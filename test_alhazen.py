@@ -1,10 +1,82 @@
 from itertools import count
 import math
+from multiprocessing import current_process
 import random
 import statistics
 import time
 
 from alhazen import Experiment
+
+
+class Trivial(Experiment):
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.results = set()
+        self.process_names = set()
+
+    def prepare_experiment(self, **kwargs):
+        self.results.add(tuple(kwargs.items()))
+
+    def setup(self):
+        self.setup_called = "setup called"
+
+    def prepare_condition(self, condition, context):
+        context["c"] = condition
+
+    def prepare_participant(self, participant, condition, context):
+        context["p"] = participant
+
+    def run_participant(self, participant, condition, context):
+        return ((participant, condition, context["c"], context["p"], self.setup_called),
+                current_process().name)
+
+    def finish_participant(self, participant, condition, result):
+        self.results.add(result[0])
+        self.process_names.add(result[1])
+
+    def finish_experiment(self):
+        self.results.add("experiment finished")
+
+
+def test_trivial():
+    tr = Trivial(show_progress=False)
+    assert tr.participants == 1
+    assert tr.conditions == (None,)
+    assert tr.rounds == 1
+    assert tr.process_count > 0
+    assert not tr.show_progress
+    assert tr.run(a=True, b=17) is tr
+    assert tr.results == {"experiment finished",
+                          (0, None, None, 0, "setup called"),
+                          (("a", True), ("b", 17))}
+    assert len(tr.process_names) == 1
+    tr = Trivial(show_progress=False,
+                 conditions=(2**i for i in range(4)),
+                 process_count=2,
+                 participants=3,
+                 rounds=4)
+    assert tr.participants == 3
+    assert tr.conditions == (1, 2, 4, 8)
+    assert tr.rounds == 4
+    assert tr.process_count == 2
+    assert not tr.show_progress
+    assert tr.run(a=False, c=-7) is tr
+    assert tr.results == {"experiment finished",
+                          (1, 1, 1, 1, "setup called"),
+                          (1, 2, 2, 1, "setup called"),
+                          (2, 2, 2, 2, "setup called"),
+                          (1, 8, 8, 1, "setup called"),
+                          (0, 1, 1, 0, "setup called"),
+                          (0, 2, 2, 0, "setup called"),
+                          (0, 4, 4, 0, "setup called"),
+                          (0, 8, 8, 0, "setup called"),
+                          (2, 1, 1, 2, "setup called"),
+                          (2, 4, 4, 2, "setup called"),
+                          (1, 4, 4, 1, "setup called"),
+                          (("a", False), ("c", -7)),
+                          (2, 8, 8, 2, "setup called")}
+    assert len(tr.process_names) == 2
 
 
 class TrivialRandom(Experiment):
