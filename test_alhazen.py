@@ -22,10 +22,14 @@ class Trivial(Experiment):
         self.setup_called = "setup called"
 
     def prepare_condition(self, condition, context):
+        try:
+            condition *= 3
+        except TypeError:
+            pass
         context["c"] = condition
 
     def prepare_participant(self, participant, condition, context):
-        context["p"] = participant
+        context["p"] = participant * 7
 
     def run_participant(self, participant, condition, context):
         return ((participant, condition, context["c"], context["p"], self.setup_called),
@@ -47,9 +51,9 @@ def test_trivial():
     assert tr.process_count > 0
     assert not tr.show_progress
     assert tr.run(a=True, b=17) is tr
-    assert tr.results == {"experiment finished",
-                          (0, None, None, 0, "setup called"),
-                          (("a", True), ("b", 17))}
+    assert tr.results == {(('a', True), ('b', 17)),
+                          (0, None, None, 0, 'setup called'),
+                          'experiment finished'}
     assert len(tr.process_names) == 1
     tr = Trivial(show_progress=False,
                  conditions=(2**i for i in range(4)),
@@ -62,20 +66,20 @@ def test_trivial():
     assert tr.process_count == 2
     assert not tr.show_progress
     assert tr.run(a=False, c=-7) is tr
-    assert tr.results == {"experiment finished",
-                          (1, 1, 1, 1, "setup called"),
-                          (1, 2, 2, 1, "setup called"),
-                          (2, 2, 2, 2, "setup called"),
-                          (1, 8, 8, 1, "setup called"),
-                          (0, 1, 1, 0, "setup called"),
-                          (0, 2, 2, 0, "setup called"),
-                          (0, 4, 4, 0, "setup called"),
-                          (0, 8, 8, 0, "setup called"),
-                          (2, 1, 1, 2, "setup called"),
-                          (2, 4, 4, 2, "setup called"),
-                          (1, 4, 4, 1, "setup called"),
-                          (("a", False), ("c", -7)),
-                          (2, 8, 8, 2, "setup called")}
+    assert tr.results == {(0, 8, 24, 0, 'setup called'),
+                          (0, 1, 3, 0, 'setup called'),
+                          (2, 2, 6, 14, 'setup called'),
+                          'experiment finished',
+                          (0, 2, 6, 0, 'setup called'),
+                          (2, 4, 12, 14, 'setup called'),
+                          (2, 1, 3, 14, 'setup called'),
+                          (2, 8, 24, 14, 'setup called'),
+                          (0, 4, 12, 0, 'setup called'),
+                          (('a', False), ('c', -7)),
+                          (1, 1, 3, 7, 'setup called'),
+                          (1, 8, 24, 7, 'setup called'),
+                          (1, 2, 6, 7, 'setup called'),
+                          (1, 4, 12, 7, 'setup called')}
     assert len(tr.process_names) == 2
 
 
