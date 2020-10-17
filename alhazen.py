@@ -36,11 +36,10 @@ workers should do and how to aggregate their results, declare how many workers
 to use, and then call its :meth:`run` method.
 """
 
-__version__ = "1.0"
+__version__ = "1.1"
 
 import os
 import queue
-from dataclasses import dataclass, field
 from multiprocessing import Process, Queue
 from typing import Any, List
 
@@ -49,7 +48,6 @@ from tqdm import tqdm
 TIMEOUT = 0.08
 
 
-@dataclass
 class Experiment:
     """An abstract base class, concrete subclasses of which define experiments that can be
     run a collection of independent tasks, possibly distributed to multiple worker
@@ -57,56 +55,101 @@ class Experiment:
     at least override the :meth:`run_participant` method; typically it will override one
     or more other methods.
 
-    The ``participants``, if supplied, it should be a positive integer, the number of
+    The *participants*, if supplied, it should be a positive integer, the number of
     virtual participants to run. If not supplied it defaults to 1.
 
-    The ``conditions``, if supplied, should be an iterable of
+    The *conditions*, if supplied, should be an iterable of
     `picklable <https://docs.python.org/3.7/library/pickle.html#pickle-picklable>`_.
     values. These denote different conditions in which the task of the :class:`Experiment`
-    should be run, and all ``participants`` are run once against each condition.
+    should be run, and all *participants* are run once against each condition.
     Besides being picklable, conditions are usually hashable as well, to allow easy
     accumulation of data in dictionaries, though this is not required. Multiple,
     orthogonal conditions are often most easily represented as tuples of the underlying
     individual sets of conditions.
 
-    The ``rounds``, if supplied, should be a positive integer. It is supplied as a
+    The *rounds*, if supplied, should be a positive integer. It is supplied as a
     suggestion to the tasks in the worker processes, denoting how many iterations to run
     of an iterable task. Its use is not required, but is often convenient. If not supplied
     its default value is 1.
 
-    The ``process_count``, if supplied, should be a non-negative integer. If non-zero it
+    The *process_count*, if supplied, should be a non-negative integer. If non-zero it
     is the number of worker processes to use. Note that the overall program will actually
     contain one more process than this, the control process, which is also the main
     process in which the :class:`Experiment`'s :meth:`run` method is called. If
-    ``process_count`` is zero it indicates that the number of work processes to be used
-    should be the number of cores available, as determined by Python's ``os`` module.
-    Note that on Intel processors supporting them this count will include the "virtual"
-    cores supplied by `Hyper-threading <https://en.wikipedia.org/wiki/Hyper-threading>`_.
-    In this case it may sometimes be advantageous to use a lower number.
+    *process_count* is zero (the default if not supplied) it indicates that the number
+    of worker processes to be used should be the number of cores available, as determined
+    by Python's ``os`` module. Note that on Intel processors supporting them this count
+    will include the "virtual" cores supplied by
+    `Hyper-threading <https://en.wikipedia.org/wiki/Hyper-threading>`_. In this case it
+    may sometimes be advantageous to use a lower number.
 
-    By default when an :class:``Experiment`` is running a
+    By default when an :class:`Experiment` is running a
     `tqdm <https://tqdm.github.io/>`_ progress indicator is shown, advanced as each task
-    is completed. This may be suppressed by setting ``show_progress`` to ``False``.
-
+    is completed. This may be suppressed by setting *show_progress* to ``False``.
     """
 
-    participants: int = 1
-    conditions: List[Any] = field(default_factory=list)
-    rounds: int = 1
-    process_count: int = 0
-    show_progress: bool = True
+    def __init__(self, participants=1, conditions=None, rounds=1, process_count=0, show_progress=True):
+        self._participants = participants
+        # The following disjunction is in case conditions is an iterator returning no objects;
+        # such an iterator is truthy, but results in an empty tuple.
+        self._conditions = (tuple(conditions) or (None,)) if conditions else (None,)
+        self._rounds = rounds
+        self._process_count = min((process_count or len(os.sched_getaffinity(0))),
+                                  (participants * len(self._conditions)))
+        self._show_progress = show_progress
+
+    @property
+    def participants(self):
+        """ The number of particpants specified when this :class:`Experiment` was created.
+        This is a read only attribute and cannot be modified after the :class:`Experiment`
+        is created.
+        """
+        return self._participants
+
+    @property
+    def conditions(self):
+        """A tuple containing the conditions specified when this :class:`Experiment` was
+        created. This is a read only attribute and cannot be modified after the
+        :class:`Experiment` is created.
+        """
+        return self._conditions
+
+    @property
+    def rounds(self):
+        """ The number of rounds specified when this :class:`Experiment` was  created.
+        This is a read only attribute and cannot be modified after the :class:`Experiment`
+        is created.
+        """
+        return self._rounds
+
+    @property
+    def process_count(self):
+        """ The number of worker processes this :class:`Experiment` will use. This may
+        differ from the number specified when the :class:`Experiment` was created, either
+        because that number was zero, or because there are fewer actual tasks to perform.
+        This is a read only attribute and cannot be modified after the :class:`Experiment`
+        is created.
+        """
+        return self._process_count
+
+    @property
+    def show_progress(self):
+        """Whether or not to show a progress indicator while this :class:`Experiment` is
+        running. This is a read only attribute and cannot be modified after the
+        :class:`Experiment` is created.
+        """
+        return self._show_progress
 
     def prepare_experiment(self, **kwargs):
        """The control process calls this method, once, before any of the other methods in
-       the public API. If any keyword arguments were passed to to
-       :class:`Experiment`'s :meth:`run` method, they are passed to this
-       method. It can be used to allocate data structures or initialize other
-       state required by the experiment. It can count on the
-       :class:`Experiment`'s ``process_count`` slot have been initialized to
-       the number of workers that will actually be used, as well as its
-       ``conditions`` slot containing a list. This method is intended to be
-       overridden in subclasses, and should not be called directly by the
-       programmer. The default implementation of this method does nothing.
+       the public API. If any keyword arguments were passed to to :class:`Experiment`'s
+       :meth:`run` method, they are passed to this method. It can be used to allocate data
+       structures or initialize other state required by the experiment. It can count on
+       the :class:`Experiment`'s *process_count* slot have been initialized to the
+       number of workers that will actually be used, as well as its *conditions* slot
+       containing a list. This method is intended to be overridden in subclasses, and
+       should not be called directly by the programmer. The default implementation of this
+       method does nothing.
        """
        pass
 
@@ -121,9 +164,9 @@ class Experiment:
 
     def prepare_condition(self, condition, context):
         """The control process calls this method before asking the workers to execute
-        tasks in the given ``condition``. The ``context`` is a dictionary into which the
+        tasks in the given *condition*. The *context* is a dictionary into which the
         method may write information that it wishes to pass to the task in the worker
-        processes. Information added to the ``context`` must be
+        processes. Information added to the *context* must be
         `picklable <https://docs.python.org/3.7/library/pickle.html#pickle-picklable>`_.
         This method is intended to be overridden in subclasses, and should not be called
         directly by the programmer. The default implementation of this method does
@@ -133,14 +176,14 @@ class Experiment:
 
     def prepare_participant(self, participant, condition, context):
         """The control process calls this method before asking a worker to execute a task
-        on behalf of a ``participant``, in this ``condition``. The ``participant`` is an
-        integer; participants are number sequentially, starting from zero. The ``context``
+        on behalf of a *participant*, in this *condition*. The *participant* is an
+        integer; participants are number sequentially, starting from zero. The *context*
         is a dictionary into which the method may write information that it wishes to pass
-        to the task in the worker processes. Information added to the ``context`` must be
+        to the task in the worker processes. Information added to the *context* must be
         `picklable <https://docs.python.org/3.7/library/pickle.html#pickle-picklable>`_.
-        The ``context`` contains any information added to it by
+        The *context* contains any information added to it by
         :meth:`prepare_condition`, which is called before any calls to this method for a
-        particular ``condition``. The ``context`` passed to this method is a fresh copy of
+        particular *condition*. The *context* passed to this method is a fresh copy of
         that potentially modified by :meth:`prepare_condition`, and does not contain any
         modifications made by earlier calls to :meth:`prepare_participant`. This method is
         intended to be overridden in subclasses, and should not be called directly by the
@@ -149,30 +192,26 @@ class Experiment:
         """
         pass
 
-    def run_participant(self, rounds, participant, condition, context):
+    def run_participant(self, participant, condition, context):
         """This is the principal method called in a worker process, and each call of this
-        method executes the task of one participant in the given ``condition``. The
-        ``participant`` is a non-negative integer identifying the participant. The value
-        of ``rounds``, a positive integer, is a suggestion of how many rounds to run an
-        iterative task, as supplied when the :class:`Experiment` was defined; however, the
-        task need not be iterative, and might define a different way to terminate than as
-        simple counter of rounds, in which case ``rounds`` may be ignored. The ``context``
+        method executes the task of one participant in the given *condition*. The
+        *participant* is a non-negative integer identifying the participant. The *context*
         is a dictionary possibly containing additional parameters or other information
         used by the tasks and provided by the :meth:`prepare_condition` and/or
         :meth:`prepare_participant` methods. This method typically returns a value, which
         is provided to the control process's :meth:`finish_participant` method. Any value
         :meth:`run_participant` returns must be
         `picklable <https://docs.python.org/3.7/library/pickle.html#pickle-picklable>`_.
-        This method must be overridden by subclasses, and should not be called directly
-        by the programmer. The default implementation of this method raises a
-        :Exc:`NotImplementedError`.
-
+        For tasks that contain iteratonos of a fixed number of rounds t is frequently
+        useful to consult the :attr:`rounds` attribute in this method. This method must be
+        overridden by subclasses, and should not be called directly by the programmer. The
+        default implementation of this method raises a :Exc:`NotImplementedError`.
         """
         raise NotImplementedError("The run_participant() method must be overridden")
 
     def finish_participant(self, participant, condition, result):
         """The control process calls this method after each participant's task has been
-        completed by a worker process. Passed as ``results`` is the value returned by the
+        completed by a worker process. Passed as *results* is the value returned by the
         :meth:`run_participant` method in the worker process, or ``None`` if no value was
         returned. This method is often used for aggregating results from the workers'
         actions. This method is intended to be overridden in subclasses, and should not be
@@ -203,25 +242,22 @@ class Experiment:
         :class:`Experiment`'s :meth:`prepare_experiment` method. Returns this
         :class:`Experiment`.
         """
-        self.conditions = self.conditions or (None,)
-        total_tasks = self.participants * len(self.conditions)
-        self.process_count = min((self.process_count or len(os.sched_getaffinity(0))),
-                                 total_tasks)
+        total_tasks = self._participants * len(self._conditions)
         self.prepare_experiment(**kwargs)
         task_q = Queue()
         result_q = Queue()
         processes = [ Process(target=self.run_one, args=[task_q, result_q])
-                      for i in range(self.process_count) ]
+                      for i in range(self._process_count) ]
+        for p in processes:
+            p.start()
         try:
-            for p in processes:
-                p.start()
-            tasks = ((c, p) for c in self.conditions for p in range(self.participants))
+            tasks = ((c, p) for c in self._conditions for p in range(self._participants))
             tasks_completed = 0
-            self.progress = self.show_progress and tqdm(total=total_tasks)
+            self._progress = self._show_progress and tqdm(total=total_tasks)
             condition_context = None
             current_condition = None
             participant = None
-            results = { c: [None] * self.participants for c in self.conditions }
+            results = { c: [None] * self._participants for c in self._conditions }
             blocking = False
             while tasks_completed < total_tasks:
                 did_something = False
@@ -249,8 +285,8 @@ class Experiment:
                         self.finish_participant(p, c, result)
                         tasks_completed += 1
                         did_something = True
-                        if self.progress:
-                            self.progress.update()
+                        if self._progress:
+                            self._progress.update()
                     except queue.Empty:
                         break
                 blocking = not did_something
@@ -262,8 +298,8 @@ class Experiment:
                 p.join()
             result_q.close()
             task_q.close()
-            if self.progress:
-                self.progress.close()
+            if self._progress:
+                self._progress.close()
         return self
 
     def run_one(self, task_q, result_q):
@@ -273,5 +309,5 @@ class Experiment:
             participant, condition, context = task_q.get()
             if participant is None:
                 break
-            result = self.run_participant(self.rounds, participant, condition, context)
+            result = self.run_participant(participant, condition, context)
             result_q.put((participant, condition, result))

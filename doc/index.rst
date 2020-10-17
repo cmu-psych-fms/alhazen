@@ -97,8 +97,8 @@ model, written using `PyACTUp <https://halle.psy.cmu.edu/pyactup/>`_.
 We will override the :meth:`run_participant` method of our
 :class:`Experiment` class. This method will be called in a worker
 process for each participant being run by that worker process. For
-this first example we will ignore the ``participant``, ``condition``
-and ``context`` parameters to this method. Note that the return value
+this first example we will ignore the *participant*, *condition*
+and *context* parameters to this method. Note that the return value
 from :meth:`run_participant` is delivered to the parent, control
 process for aggregation with the results for other participants, both
 from the same worker process and from other worker processes. This
@@ -118,13 +118,12 @@ return value must be
             super().__init__(**kwargs)
             self.results = [0] * self.rounds
 
-        def run_participant(self, rounds, participant,
-                                  condition, context):
-            risky_chosen = [True] * rounds
+        def run_participant(self, participant, condition, context):
+            risky_chosen = [True] * self.rounds
             mem = pyactup.Memory()
             mem.learn(choice="safe", payoff=12, advance=0)
             mem.learn(choice="risky", payoff=12)
-            for r in range(rounds):
+            for r in range(self.rounds):
                 choice, bv = mem.best_blend("payoff",
                                             ("safe", "risky"),
                                             "choice")
@@ -144,8 +143,8 @@ parent, control process, and will aggregate the results from the
 various worker processes. It is called once for each execution of the
 :meth:`run_participant` method in a worker process, with the result
 returned from that :meth:`run_participant` execution as the value of the
-``result`` parameter passed to :meth:`finish_participant`. Again, we are
-currently ignoring the ``participant`` and ``condition`` parameters.
+*result* parameter passed to :meth:`finish_participant`. Again, we are
+currently ignoring the *participant* and *condition* parameters.
 
 .. code-block:: python
 
@@ -160,13 +159,12 @@ currently ignoring the ``participant`` and ``condition`` parameters.
             super().__init__(**kwargs)
             self.results = [0] * self.rounds
 
-        def run_participant(self, rounds, participant,
-                                  condition, context):
-            risky_chosen = [True] * rounds
+        def run_participant(self, participant, condition, context):
+            risky_chosen = [True] * self.rounds
             mem = pyactup.Memory()
             mem.learn(choice="safe", payoff=12, advance=0)
             mem.learn(choice="risky", payoff=12)
-            for r in range(rounds):
+            for r in range(self.rounds):
                 choice, bv = mem.best_blend("payoff",
                                             ("safe", "risky"),
                                             "choice")
@@ -192,7 +190,7 @@ of participants across worker processes, tell them run, collect their
 results, all while correctly transferring information between the
 various processes and safely synchronizing their activities. When
 finished the final, aggregated result will be available in the
-:class:``SafeRisky``’s ``results`` slot.
+:class:*SafeRisky*’s *results* slot.
 
 To make use of this we will add a :func:`main` function that will allocate
 a :class:`SafeRisky` object, initialized with the desired number of rounds
@@ -219,13 +217,12 @@ worker processes to use.
             super().__init__(**kwargs)
             self.results = [0] * self.rounds
 
-        def run_participant(self, rounds, participant,
-                                  condition, context):
-            risky_chosen = [True] * rounds
+        def run_participant(self, participant, condition, context):
+            risky_chosen = [True] * self.rounds
             mem = pyactup.Memory()
             mem.learn(choice="safe", payoff=12, advance=0)
             mem.learn(choice="risky", payoff=12)
-            for r in range(rounds):
+            for r in range(self.rounds):
                 choice, bv = mem.best_blend("payoff",
                                             ("safe", "risky"),
                                             "choice")
@@ -280,10 +277,10 @@ parallel on the 32 core machine, it completes in only three seconds.
 
 Often we want to run experiments like these with multiple, different
 conditions, such as different parameters to the models or to the
-tasks. This is facilitated by using the ``conditions`` slot of the
+tasks. This is facilitated by using the *conditions* slot of the
 :class:`Experiment` object, an iterable the elements of which are passed to
 the :meth:`run_participant` method in the work process. Note that the
-total number of participants is the product of ``participants`` and
+total number of participants is the product of *participants* and
 the number of conditions. A condition can be any
 `picklable <https://docs.python.org/3.7/library/pickle.html#pickle-picklable>`_
 Python value, though it is often most convenient to make it also a hashable
@@ -315,13 +312,13 @@ value.
             super().__init__(**kwargs)
             self.results = {c: [0] * self.rounds for c in self.conditions}
 
-        def run_participant(self, rounds, participant, condition, context):
+        def run_participant(self, participant, condition, context):
             p = condition / 10
-            risky_chosen = [True] * rounds
+            risky_chosen = [True] * self.rounds
             mem = pyactup.Memory()
             mem.learn(choice="safe", payoff=12, advance=0)
             mem.learn(choice="risky", payoff=12)
-            for r in range(rounds):
+            for r in range(self.rounds):
                 choice, blended_value = mem.best_blend("payoff",
                                                        ("safe", "risky"),
                                                        "choice")
@@ -386,6 +383,16 @@ API Reference
 =============
 
 .. autoclass:: Experiment
+
+   .. autoattribute:: participants
+
+   .. autoattribute:: conditions
+
+   .. autoattribute:: rounds
+
+   .. autoattribute:: process_count
+
+   .. autoattribute:: show_progress
 
    .. automethod:: run
 

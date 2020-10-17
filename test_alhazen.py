@@ -13,12 +13,12 @@ class TrivialRandom(Experiment):
         super().__init__(**kwargs)
         self.results = set()
 
-    def run_participant(self, rounds, participant, condition, context):
+    def run_participant(self, participant, condition, context):
         # Sometimes delay to mix things up a bit
         if random.random() < 0.1:
            time.sleep(0.1 * random.random())
         results = []
-        for i in range(rounds):
+        for i in range(self.rounds):
             results.append(random.randint(0, 10**60)) # should be conflict-free :-)
         return results
 
@@ -58,10 +58,10 @@ class LogisticSampler(Experiment):
         # gets called properly.
         self.random_source = random.random
 
-    def run_participant(self, rounds, participant, condition, context):
+    def run_participant(self, participant, condition, context):
         results = []
         sum = 0
-        for r in range(rounds):
+        for r in range(self.rounds):
             rand = self.random_source()
             sum += context["width"] * math.log((1 - rand) / rand)
             results.append(sum)

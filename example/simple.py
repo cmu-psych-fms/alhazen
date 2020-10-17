@@ -14,12 +14,12 @@ class SafeRisky(Experiment):
         super().__init__(**kwargs)
         self.results = [0] * self.rounds
 
-    def run_participant(self, rounds, participant, condition, context):
-        risky_chosen = [True] * rounds
+    def run_participant(self, participant, condition, context):
+        risky_chosen = [True] * self.rounds
         mem = pyactup.Memory()
         mem.learn(choice="safe", payoff=12, advance=0)
         mem.learn(choice="risky", payoff=12)
-        for r in range(rounds):
+        for r in range(self.rounds):
             choice, blended_value = mem.best_blend("payoff", ("safe", "risky"), "choice")
             if choice == "safe":
                 payoff = 1
