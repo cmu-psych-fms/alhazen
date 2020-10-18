@@ -1,4 +1,4 @@
-Alhazen version 1.1
+Alhazen version 1.2
 *******************
 
 .. toctree::
@@ -41,14 +41,14 @@ you may have to modify the above in various ways
 
 If you are unable to install Alhazen as above, you can instead
 `download a tarball <https://bitbucket.org/dfmorrison/alhazen/downloads/?tab=tags>`_.
-The tarball will have a filename something like alhazen-1.1.tar.gz.
-Assuming this file is at ``/some/directory/alhazen-1.1.tar.gz`` install it by typing at the command line
+The tarball will have a filename something like alhazen-1.2.tar.gz.
+Assuming this file is at ``/some/directory/alhazen-1.2.tar.gz`` install it by typing at the command line
 
-  .. parsed-literal:: pip install /some/directory/alhazen-1.1.tar.gz
+  .. parsed-literal:: pip install /some/directory/alhazen-1.2.tar.gz
 
 Alternatively you can untar the tarball with
 
-  .. parsed-literal:: tar -xf /some/directory/alhazen-1.1.tar.gz
+  .. parsed-literal:: tar -xf /some/directory/alhazen-1.2.tar.gz
 
 and then change to the resulting directory and type
 
@@ -70,202 +70,137 @@ earning the player one point, and the other “risky,” sometimes earning
 the player ten points, but more frequently none, but with the
 probability of the high payoff set to 0.1 so that the expected value
 of either choice is one point. The player has no *a priori* knowledge
-of the game, and learns of it from their experience. We’ll have 10,000
-virtual participants perform this task, each for 200 rounds, learning
-from their past experiences in earlier rounds. Then we’ll graph the
-average number of times a participant made the risky choice as a
-function of the round.
-
-First we start by make a subclass of the Alhazen :class:`Experiment` class,
-and add a ``results`` slot to this object that we will use to record
-the fraction of participants making the risky choice.
-
-.. code-block:: python
-
-    from alhazen import Experiment
-
-    class SafeRisky(Experiment):
-
-        def __init__(self, **kwargs):
-            super().__init__(**kwargs)
-            self.results = [0] * self.rounds
-
-
-The players actions will be decided by an
+of the game, and learns of it from their experience. Some number of
+virtual participants will perform this task for a fixed number of
+rounds, learning from their past experiences in earlier rounds. Then
+we’ll graph the average number of times a participant made the risky
+choice as a function of the round. In our implementation the simulated
+participants’ actions will be decided by an
 `Instance Based Learning <https://www.sciencedirect.com/science/article/abs/pii/S0364021303000314>`_
 model, written using `PyACTUp <https://halle.psy.cmu.edu/pyactup/>`_.
-We will override the :meth:`run_participant` method of our
-:class:`Experiment` class. This method will be called in a worker
-process for each participant being run by that worker process. For
-this first example we will ignore the *participant*, *condition*
-and *context* parameters to this method. Note that the return value
-from :meth:`run_participant` is delivered to the parent, control
-process for aggregation with the results for other participants, both
-from the same worker process and from other worker processes. This
-return value must be
-`picklable <https://docs.python.org/3.7/library/pickle.html#pickle-picklable>`_.
 
+First we start by make a subclass of the Alhazen
+:class:`IteratedExperiment` class, and override its
+:meth:`run_participant_prepare` method to allocate for each
+participant a PyACTUp ``Memory`` object. This method will be called
+within a worker process, and for this example we will ignore the
+*participant*, *condition* and *context* parameters to this method.
 
 .. code-block:: python
 
     from alhazen import Experiment
     import pyactup
-    import random
 
-    class SafeRisky(Experiment):
+    class SafeRisky(IteratedExperiment):
 
-        def __init__(self, **kwargs):
-            super().__init__(**kwargs)
-            self.results = [0] * self.rounds
+        def run_participant_prepare(self, participant, condition, context):
+            self.memory = pyactup.Memory()
 
-        def run_participant(self, participant, condition, context):
-            risky_chosen = [True] * self.rounds
-            mem = pyactup.Memory()
-            mem.learn(choice="safe", payoff=12, advance=0)
-            mem.learn(choice="risky", payoff=12)
-            for r in range(self.rounds):
-                choice, bv = mem.best_blend("payoff",
-                                            ("safe", "risky"),
-                                            "choice")
-                if choice == "safe":
-                    payoff = 1
-                    risky_chosen[r] = False
-                elif random.random() < 0.1:
-                    payoff = 10
-                else:
-                    payoff = 0
-                mem.learn(choice=choice, payoff=payoff)
-            return risky_chosen
-
-
-Next we override the :meth:`finish_participant` method. This is run in the
-parent, control process, and will aggregate the results from the
-various worker processes. It is called once for each execution of the
-:meth:`run_participant` method in a worker process, with the result
-returned from that :meth:`run_participant` execution as the value of the
-*result* parameter passed to :meth:`finish_participant`. Again, we are
-currently ignoring the *participant* and *condition* parameters.
+We next initialize the PyACTUp ``Memory`` and override the
+:meth:`run_participant_run` method to actually implement the cognitive
+model. It makes a choice, learns the payoff that that choice produced,
+and returns whether or not it made the risky choice, for subsequent
+reporting by the parent, control process. This return value must be
+`picklable
+<https://docs.python.org/3.7/library/pickle.html#pickle-picklable>`_.
+Again this method is called in a worker process, and we are ignoring
+the values of the *round*, *participant*, *condition* and *context*
+parameters.
 
 .. code-block:: python
 
-    from alhazen import Experiment
-    from itertools import count
+    from alhazen import IteratedExperiment
     import pyactup
     import random
 
-    class SafeRisky(Experiment):
+    class SafeRisky(IteratedExperiment):
 
-        def __init__(self, **kwargs):
-            super().__init__(**kwargs)
-            self.results = [0] * self.rounds
+        def run_participant_prepare(self, participant, condition, context):
+            self.memory = pyactup.Memory()
+            self.memory.learn(choice="safe", payoff=12, advance=0)
+            self.memory.learn(choice="risky", payoff=12)
 
-        def run_participant(self, participant, condition, context):
-            risky_chosen = [True] * self.rounds
-            mem = pyactup.Memory()
-            mem.learn(choice="safe", payoff=12, advance=0)
-            mem.learn(choice="risky", payoff=12)
-            for r in range(self.rounds):
-                choice, bv = mem.best_blend("payoff",
-                                            ("safe", "risky"),
-                                            "choice")
-                if choice == "safe":
-                    payoff = 1
-                    risky_chosen[r] = False
-                elif random.random() < 0.1:
-                    payoff = 10
-                else:
-                    payoff = 0
-                mem.learn(choice=choice, payoff=payoff)
-            return risky_chosen
-
-        def finish_participant(self, participant, condition, result):
-            for r, i in zip(result, count()):
-                if r:
-                    self.results[i] += r / self.participants
-
+        def run_participant_run(self, round, participant, condition, context):
+            choice, bv = self.memory.best_blend("payoff", ("safe", "risky"), "choice")
+            if choice == "safe":
+                payoff = 1
+            elif random.random() < 0.1:
+                payoff = 10
+            else:
+                payoff = 0
+            self.memory.learn(choice=choice, payoff=payoff)
+            return choice == "risky"
 
 This all that is required to be able to run our model in multiple
-processes. The :class:`Experiment` super-class will handle the partitioning
-of participants across worker processes, tell them run, collect their
+processes. The :class:`IteratedExperiment` super-class will handle the partitioning
+of participants across worker processes, tell them to run, collect their
 results, all while correctly transferring information between the
 various processes and safely synchronizing their activities. When
-finished the final, aggregated result will be available in the
-:class:*SafeRisky*’s *results* slot.
+finished the final, aggregated result will be available using
+the :meth:`results` method.
 
-To make use of this we will add a :func:`main` function that will allocate
-a :class:`SafeRisky` object, initialized with the desired number of rounds
-and participants, call its :meth:`run` method, and draw a graph of the
-results with Matplotlib. The resulting program can also be called from
-the command line with an optional parameter specifying the number of
-worker processes to use.
+To make use of this we will add a :func:`main` function that will
+allocate a :class:`SafeRisky` object, initialized with the desired
+number of rounds and participants, call its :meth:`run` method, and
+draw a graph of the results with Matplotlib. This progream takes three
+command line arguments to specify the number of participants, number
+of rounds and number of worker processes. If these arguments are not
+provided explicitly they default to 10,000 participants, 200 rounds,
+and as many worker processes as the machine it is running in has
+cores.
 
 .. code-block:: python
 
-    from alhazen import Experiment
+    from alhazen import IteratedExperiment
     import click
-    from itertools import count
     import matplotlib.pyplot as plt
     import pyactup
     import random
 
-    ROUNDS = 200
-    PARTICIPANTS = 10_000
+    class SafeRisky(IteratedExperiment):
 
-    class SafeRisky(Experiment):
+        def run_participant_prepare(self, participant, condition, context):
+            self.memory = pyactup.Memory()
+            self.memory.learn(choice="safe", payoff=12, advance=0)
+            self.memory.learn(choice="risky", payoff=12)
 
-        def __init__(self, **kwargs):
-            super().__init__(**kwargs)
-            self.results = [0] * self.rounds
-
-        def run_participant(self, participant, condition, context):
-            risky_chosen = [True] * self.rounds
-            mem = pyactup.Memory()
-            mem.learn(choice="safe", payoff=12, advance=0)
-            mem.learn(choice="risky", payoff=12)
-            for r in range(self.rounds):
-                choice, bv = mem.best_blend("payoff",
-                                            ("safe", "risky"),
-                                            "choice")
-                if choice == "safe":
-                    payoff = 1
-                    risky_chosen[r] = False
-                elif random.random() < 0.1:
-                    payoff = 10
-                else:
-                    payoff = 0
-                mem.learn(choice=choice, payoff=payoff)
-            return risky_chosen
-
-        def finish_participant(self, participant, condition, result):
-            for r, i in zip(result, count()):
-                if r:
-                    self.results[i] += r / self.participants
-
+        def run_participant_run(self, round, participant, condition, context):
+            choice, bv = self.memory.best_blend("payoff", ("safe", "risky"), "choice")
+            if choice == "safe":
+                payoff = 1
+            elif random.random() < 0.1:
+                payoff = 10
+            else:
+                payoff = 0
+            self.memory.learn(choice=choice, payoff=payoff)
+            return choice == "risky"
 
     @click.command()
-    @click.option("--workers", "-w", default=0,
-                  help=("number of worker processes, zero (the default) "
-                        "means as many as available cores"))
-    def main(**kwargs):
-        sr = SafeRisky(participants=PARTICIPANTS,
-                       rounds=ROUNDS,
-                       process_count=kwargs["workers"])
-        sr.run()
-        plt.plot(range(1, sr.rounds + 1), sr.results)
+    @click.option("--rounds", default=200, help="the number of rounds each participant plays")
+    @click.option("--participants", default=10_000, help="the number of participants")
+    @click.option("--workers", default=0,
+                  help="number of worker processes, zero (the default) means as many as available cores")
+    def main(rounds=200, participants=10_000, workers=0):
+        exp = SafeRisky(rounds=rounds,
+                        participants=participants,
+                        process_count=workers)
+        exp.run()
+        plt.plot(range(1, rounds + 1),
+                 list(sum(r[i] for r in exp.results()) / participants
+                          for i in range(rounds)))
         plt.xlabel("round")
         plt.ylim(-0.05, 1.05)
         plt.ylabel("fraction choosing risky")
-        plt.title(f"Safe versus Risky, {sr.participants:,d} participants")
+        plt.title(f"Safe versus Risky, {participants:,d} participants")
         plt.show()
-
 
     if __name__== "__main__":
         main()
 
-
-When run a graph like the following is displayed. We see that the model has
-a strong bias against the risky choice, even though it has the same expected
-value as the safe one.
+When run with the default command line arguments a graph like the
+following is displayed. We see that the model has a strong bias
+against the risky choice, even though it has the same expected value
+as the safe one.
 
     .. image:: simple.png
 
@@ -278,94 +213,80 @@ parallel on the 32 core machine, it completes in only three seconds.
 Often we want to run experiments like these with multiple, different
 conditions, such as different parameters to the models or to the
 tasks. This is facilitated by using the *conditions* slot of the
-:class:`Experiment` object, an iterable the elements of which are passed to
-the :meth:`run_participant` method in the work process. Note that the
-total number of participants is the product of *participants* and
-the number of conditions. A condition can be any
-`picklable <https://docs.python.org/3.7/library/pickle.html#pickle-picklable>`_
-Python value, though it is often most convenient to make it also a hashable
-value so that data can be gather into dictionaries indexed by
-conditions. Note that it is easy to run cross products of two or more
-orthogonal sets of conditions by using tuples of their elements.
+:class:`IteratedExperiment` object, an iterable the elements of which
+are passed to the :meth:`run_participant` method in the work process.
+Note that the total number of participants is the product of
+*participants* and the number of conditions. A condition can be any
+Python value that is both hashable and
+`picklable <https://docs.python.org/3.7/library/pickle.html#pickle-picklable>`_,
+Note that it is easy to run cross products of two or more orthogonal
+sets of conditions by using tuples of their elements.
 
 Here we augment the above :class:`SafeRisky` implementation to use different
 probabilities for the risky choice, for different expected values of that
 choice. The values we pass as conditions will be numbers, the desired expected
-value.
+values.
 
 .. code-block:: python
 
-    from alhazen import Experiment
+    from alhazen import IteratedExperiment
     import click
     from itertools import count
     import matplotlib.pyplot as plt
     import pyactup
     import random
 
-    ROUNDS = 200
-    PARTICIPANTS = 10_000
     EXPECTED_VALUES = [5, 4, 3, 2, 1]
 
-    class SafeRisky(Experiment):
+    class SafeRisky(IteratedExperiment):
 
-        def __init__(self, **kwargs):
-            super().__init__(**kwargs)
-            self.results = {c: [0] * self.rounds for c in self.conditions}
+        def run_participant_prepare(self, participant, condition, context):
+            self.memory = pyactup.Memory()
+            self.memory.learn(choice="safe", payoff=12, advance=0)
+            self.memory.learn(choice="risky", payoff=12)
 
-        def run_participant(self, participant, condition, context):
-            p = condition / 10
-            risky_chosen = [True] * self.rounds
-            mem = pyactup.Memory()
-            mem.learn(choice="safe", payoff=12, advance=0)
-            mem.learn(choice="risky", payoff=12)
-            for r in range(self.rounds):
-                choice, blended_value = mem.best_blend("payoff",
-                                                       ("safe", "risky"),
-                                                       "choice")
-                if choice == "safe":
-                    payoff = 1
-                    risky_chosen[r] = False
-                elif random.random() < p:
-                    payoff = 10
-                else:
-                    payoff = 0
-                mem.learn(choice=choice, payoff=payoff)
-            return risky_chosen
-
-        def finish_participant(self, participant, condition, result):
-            for r, i in zip(result, count()):
-                if r:
-                    self.results[condition][i] += r / self.participants
-
+        def run_participant_run(self, round, participant, condition, context):
+            choice, bv = self.memory.best_blend("payoff", ("safe", "risky"), "choice")
+            if choice == "safe":
+                payoff = 1
+            elif random.random() < condition / 10:
+                payoff = 10
+            else:
+                payoff = 0
+            self.memory.learn(choice=choice, payoff=payoff)
+            return choice == "risky"
 
     @click.command()
-    @click.option("--workers", "-w", default=0,
-                  help=("number of worker processes, zero (the default) "
-                        "means as many as available cores"))
-    def main(**kwargs):
-        sr = SafeRisky(participants=PARTICIPANTS,
-                       rounds=ROUNDS,
-                       conditions=EXPECTED_VALUES,
-                       process_count=kwargs["workers"])
-        sr.run()
-        for c in sr.conditions:
-            plt.plot(range(1, sr.rounds + 1), sr.results[c],
+    @click.option("--rounds", default=200, help="the number of rounds each participant plays")
+    @click.option("--participants", default=10_000, help="the number of participants")
+    @click.option("--workers", default=0,
+                  help="number of worker processes, zero (the default) means as many as available cores")
+    def main(rounds=200, participants=10_000, workers=0):
+        exp = SafeRisky(rounds=rounds,
+                        conditions=EXPECTED_VALUES,
+                        participants=participants,
+                        process_count=workers)
+        exp.run()
+        for c in exp.conditions:
+            plt.plot(range(1, rounds + 1),
+                     list(sum(r[i] for r in exp.results(c)) / participants
+                              for i in range(rounds)),
                      label=f"Risky EV = {c}")
         plt.legend()
         plt.xlabel("round")
         plt.ylim(-0.05, 1.05)
         plt.ylabel("fraction choosing risky")
-        plt.title(f"Safe versus Risky, {sr.participants:,d} participants")
+        plt.title(f"Safe versus Risky, {participants:,d} participants")
         plt.show()
-
 
     if __name__== "__main__":
         main()
 
 
-When run, a graph like the following is displayed. We see that the
-probability of getting the high payoff must be surprisingly high to
-convince the model to overcome its averseness to risk.
+When run with the default command line arguments, a graph like the
+following is displayed. We see that the probability of getting the
+high payoff must be surprisingly high to convince the model to
+overcome its distaste for risk.
 
     .. image:: conditions.png
 
@@ -375,12 +296,16 @@ processes,``--workers=32``, only fifteen seconds.
 
 See details of the API in the next section for other methods that can
 be overridden to hook into different parts of the process of running
-the experiment.
+the experiment, as well as for the underlying :meth:`Experiment`
+class.
 
 
 
 API Reference
 =============
+
+Experiments
+-----------
 
 .. autoclass:: Experiment
 
@@ -388,13 +313,13 @@ API Reference
 
    .. autoattribute:: conditions
 
-   .. autoattribute:: rounds
-
    .. autoattribute:: process_count
 
    .. autoattribute:: show_progress
 
    .. automethod:: run
+
+   .. automethod:: results
 
    .. automethod:: run_participant
 
@@ -408,3 +333,17 @@ API Reference
 
    .. automethod:: finish_experiment
 
+Iterated Experiments
+--------------------
+
+.. autoclass:: IteratedExperiment
+
+   .. autoattribute:: rounds
+
+   .. automethod:: run_participant_prepare
+
+   .. automethod:: run_participant_run
+
+   .. automethod:: run_participant_continue
+
+   .. automethod:: run_participant_finish

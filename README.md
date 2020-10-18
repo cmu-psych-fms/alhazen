@@ -1,11 +1,13 @@
-Alhazen is a simple framework to facilitate running experiments, written in
-Python, using cognitive models, or similar applications, in multiple, parallel
-processes. It is only useful on multi-core machines, though most modern machines
-are such; the more cores, the more performance benefit you are likely to get by
-using it. It also depends upon the experiment being structured as a large number
-of identical, independent runs of the same activity, or of similar activities.
-This is a common pattern, each such run usually corresponding to a distinct
-virtual participant, or possibly a collection of interacting participants.
+Alhazen is a small, simple framework to facilitate running
+experiments, written in Python, using cognitive models, or similar
+applications, in multiple, parallel processes. It is only useful on
+multi-core machines, though most modern machines are such; the more
+cores, the more performance benefit you are likely to get by using it.
+It also depends upon the experiment being structured as a large number
+of identical, independent runs of the same activity, or of similar
+activities. This is a common pattern, each such run usually
+corresponding to a distinct virtual participant, or possibly a
+collection of interacting participants.
 
 There is [online documentation of Alhazen](https://halle.psy.cmu.edu/alhazen/),
 and the [sources](https://bitbucket.org/dfmorrison/alhazen/) are on Bitbucket.
@@ -37,14 +39,14 @@ you may have to modify the above in various ways
 
 If you are unable to install Alhazen as above, you can instead
 `download a tarball <https://bitbucket.org/dfmorrison/alhazen/downloads/?tab=tags>`_.
-The tarball will have a filename something like alhazen-1.1.tar.gz.
-Assuming this file is at ``/some/directory/alhazen-1.1.tar.gz`` install it by typing at the command line
+The tarball will have a filename something like alhazen-1.2.tar.gz.
+Assuming this file is at ``/some/directory/alhazen-1.2.tar.gz`` install it by typing at the command line
 
-  .. parsed-literal:: pip install /some/directory/alhazen-1.1.tar.gz
+  .. parsed-literal:: pip install /some/directory/alhazen-1.2.tar.gz
 
 Alternatively you can untar the tarball with
 
-  .. parsed-literal:: tar -xf /some/directory/alhazen-1.1.tar.gz
+  .. parsed-literal:: tar -xf /some/directory/alhazen-1.2.tar.gz
 
 and then change to the resulting directory and type
 
