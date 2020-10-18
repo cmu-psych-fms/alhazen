@@ -22,7 +22,7 @@ If it is not already installed, Python, for Windows, Mac OS X, Linux, or other U
 
 Normally, assuming you are connected to the internet, to install Alhazen you should simply have to type at the command line
 
-  pip install alhazen
+    pip install alhazen
 
 Depending upon various possible variations in how Python and your machine are configured
 you may have to modify the above in various ways
@@ -42,15 +42,15 @@ If you are unable to install Alhazen as above, you can instead
 The tarball will have a filename something like alhazen-1.2.1.tar.gz.
 Assuming this file is at ``/some/directory/alhazen-1.2.1.tar.gz`` install it by typing at the command line
 
-  pip install /some/directory/alhazen-1.2.1.tar.gz
+    pip install /some/directory/alhazen-1.2.1.tar.gz
 
 Alternatively you can untar the tarball with
 
-  tar -xf /some/directory/alhazen-1.2.1.tar.gz
+    tar -xf /some/directory/alhazen-1.2.1.tar.gz
 
 and then change to the resulting directory and type
 
-  python setup.py install
+    python setup.py install
 
 
 
