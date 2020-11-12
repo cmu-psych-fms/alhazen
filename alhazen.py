@@ -231,7 +231,6 @@ class Experiment:
         return (r for r in self._results[condition])
 
     def run(self, **kwargs):
-
         """This method is called by the programmer to begin processing of the various
         tasks of this :class:`Experiment`. It creates one or more worker processes, and
         partitions tasks between them ensuring that one, and exactly one, worker process
