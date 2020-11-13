@@ -37,7 +37,7 @@ method.
 
 """
 
-__version__ = "1.2.1"
+__version__ = "1.2.2"
 
 import os
 import queue
@@ -228,6 +228,8 @@ class Experiment:
         participants, only those that have so far been processed. Raises a :exc:`KeyError`
         if *condition* is not a condition in this :class:`Experiment`.
         """
+        # TODO Figure how best to prohibit running this in a worker process, and improve
+        #      the above documentation.
         return (r for r in self._results[condition])
 
     def run(self, **kwargs):
