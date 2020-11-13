@@ -37,14 +37,15 @@ method.
 
 """
 
-__version__ = "1.2.1"
+__version__ = "1.3"
 
 import os
 import queue
 import sys
 import traceback
-from multiprocessing import Process, Queue
+from multiprocessing import Process, Queue, Lock
 from typing import Any, List
+from contextlib import nullcontext
 
 from tqdm import tqdm
 
@@ -79,13 +80,16 @@ class Experiment:
     `Hyper-threading <https://en.wikipedia.org/wiki/Hyper-threading>`_. In this case it
     may sometimes be advantageous to use a lower number.
 
+    TODO document logfile
+
     By default when an :class:`Experiment` is running a
     `tqdm <https://tqdm.github.io/>`_ progress indicator is shown, advanced as each task
     is completed. This may be suppressed by setting *show_progress* to ``False``.
 
     """
 
-    def __init__(self, participants=1, conditions=None, process_count=0, show_progress=True):
+    def __init__(self, participants=1, conditions=None, process_count=0,
+                 show_progress=True, logfile=None):
         self._participants = participants
         # The following disjunction is in case conditions is an iterator returning no objects;
         # such an iterator is truthy, but results in an empty tuple.
@@ -94,6 +98,7 @@ class Experiment:
                                   (participants * len(self._conditions)))
         self._show_progress = show_progress
         self._results = {c: [None] * participants for c in self._conditions}
+        self._logfile = logfile
 
     @property
     def participants(self):
@@ -128,6 +133,11 @@ class Experiment:
         :class:`Experiment` is created.
         """
         return self._show_progress
+
+    @property
+    def logfile(self):
+        """TODO"""
+        return self._logfile
 
     def prepare_experiment(self, **kwargs):
        """The control process calls this method, once, before any of the other methods in
@@ -244,74 +254,79 @@ class Experiment:
         :class:`Experiment`.
         """
         total_tasks = self._participants * len(self._conditions)
-        self.prepare_experiment(**kwargs)
-        task_q = Queue()
-        result_q = Queue()
-        processes = [ Process(target=self._run_one, args=[task_q, result_q])
-                      for i in range(self._process_count) ]
-        for p in processes:
-            p.start()
-        try:
-            tasks = ((c, p) for c in self._conditions for p in range(self._participants))
-            tasks_completed = 0
-            self._progress = self._show_progress and tqdm(total=total_tasks)
-            condition_context = None
-            current_condition = None
-            participant = None
-            results = { c: [None] * self._participants for c in self._conditions }
-            blocking = False
-            while tasks_completed < total_tasks:
-                did_something = False
-                if participant is None:
-                    try:
-                        condition, participant = next(tasks)
-                    except StopIteration:
-                        participant = None
-                if participant is not None:
-                    if not condition_context or condition != current_condition:
-                        condition_context = dict()
-                        current_condition = condition
-                        self.prepare_condition(condition, condition_context)
-                    participant_context = dict(condition_context)
-                    self.prepare_participant(participant, condition, participant_context)
-                    try:
-                        task_q.put((participant, condition, participant_context), blocking, TIMEOUT)
-                        participant = None
-                    except queue.Full:
-                        pass
-                    did_something = True
-                while True:
-                    try:
-                        p, c, result = result_q.get(blocking, TIMEOUT)
-                        self._results[c][p] = self.finish_participant(p, c, result)
-                        tasks_completed += 1
+        self._log_lock = Lock()
+        with open(self._logfile, "w") if self._logfile else nullcontext() as self._open_log:
+            self.prepare_experiment(**kwargs)
+            task_q = Queue()
+            result_q = Queue()
+            processes = [ Process(target=self._run_one,
+                                  args=[task_q, result_q, self._log_lock, self._open_log])
+                          for i in range(self._process_count) ]
+            for p in processes:
+                p.start()
+            try:
+                tasks = ((c, p) for c in self._conditions for p in range(self._participants))
+                tasks_completed = 0
+                self._progress = self._show_progress and tqdm(total=total_tasks)
+                condition_context = None
+                current_condition = None
+                participant = None
+                results = { c: [None] * self._participants for c in self._conditions }
+                blocking = False
+                while tasks_completed < total_tasks:
+                    did_something = False
+                    if participant is None:
+                        try:
+                            condition, participant = next(tasks)
+                        except StopIteration:
+                            participant = None
+                    if participant is not None:
+                        if not condition_context or condition != current_condition:
+                            condition_context = dict()
+                            current_condition = condition
+                            self.prepare_condition(condition, condition_context)
+                        participant_context = dict(condition_context)
+                        self.prepare_participant(participant, condition, participant_context)
+                        try:
+                            task_q.put((participant, condition, participant_context), blocking, TIMEOUT)
+                            participant = None
+                        except queue.Full:
+                            pass
                         did_something = True
-                        if self._progress:
-                            self._progress.update()
-                    except queue.Empty:
-                        break
-                blocking = not did_something
-            for i in range(len(processes)):
-                task_q.put((None, None, None))
-            self.finish_experiment()
-            for p in processes:
-                p.join()
-        except:
-            traceback.print_exc()
-            for p in processes:
-                try:
-                    p.terminate
-                except:
-                    traceback.print_exc()
-        finally:
-            result_q.close()
-            task_q.close()
-            if self._progress:
-                self._progress.close()
+                    while True:
+                        try:
+                            p, c, result = result_q.get(blocking, TIMEOUT)
+                            self._results[c][p] = self.finish_participant(p, c, result)
+                            tasks_completed += 1
+                            did_something = True
+                            if self._progress:
+                                self._progress.update()
+                        except queue.Empty:
+                            break
+                    blocking = not did_something
+                for i in range(len(processes)):
+                    task_q.put((None, None, None))
+                self.finish_experiment()
+                for p in processes:
+                    p.join()
+            except:
+                traceback.print_exc()
+                for p in processes:
+                    try:
+                        p.terminate
+                    except:
+                        traceback.print_exc()
+            finally:
+                result_q.close()
+                task_q.close()
+                if self._progress:
+                    self._progress.close()
         return self
 
-    def _run_one(self, task_q, result_q):
+    def _run_one(self, task_q, result_q, lock, file):
         # called in the child processes
+        self._log_lock = lock
+        self._open_log = file
         try:
             self.setup()
             while True:
@@ -323,6 +338,13 @@ class Experiment:
         except:
             traceback.print_exc()
             sys.exit(1)
+
+    def log(self, *objects, sep="", end="\n"):
+        """TODO"""
+        # note: writes to stdout if no log file
+        with self._log_lock:
+            print(*objects, sep=sep, end=end, file=self._open_log, flush=True)
+
 
 
 class IteratedExperiment(Experiment):
