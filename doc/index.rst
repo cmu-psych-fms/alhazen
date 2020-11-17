@@ -1,5 +1,5 @@
 Alhazen version 1.3.1
-*******************
+*********************
 
 .. toctree::
    :maxdepth: 3
