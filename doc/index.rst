@@ -1,4 +1,4 @@
-Alhazen version 1.2
+Alhazen version 1.3.1
 *******************
 
 .. toctree::
@@ -41,14 +41,14 @@ you may have to modify the above in various ways
 
 If you are unable to install Alhazen as above, you can instead
 `download a tarball <https://bitbucket.org/dfmorrison/alhazen/downloads/?tab=tags>`_.
-The tarball will have a filename something like alhazen-1.2.tar.gz.
-Assuming this file is at ``/some/directory/alhazen-1.2.tar.gz`` install it by typing at the command line
+The tarball will have a filename something like alhazen-1.3.1.tar.gz.
+Assuming this file is at ``/some/directory/alhazen-1.3.1.tar.gz`` install it by typing at the command line
 
-  .. parsed-literal:: pip install /some/directory/alhazen-1.2.tar.gz
+  .. parsed-literal:: pip install /some/directory/alhazen-1.3.1.tar.gz
 
 Alternatively you can untar the tarball with
 
-  .. parsed-literal:: tar -xf /some/directory/alhazen-1.2.tar.gz
+  .. parsed-literal:: tar -xf /some/directory/alhazen-1.3.1.tar.gz
 
 and then change to the resulting directory and type
 
@@ -66,11 +66,11 @@ Tutorial
 
 As an example we will model a player performing an iterated, binary
 choice task, where one of the two available choices is “safe,” always
-earning the player one point, and the other “risky,” sometimes earning
-the player ten points, but more frequently none, but with the
+earning the player one point, and the other is “risky,” sometimes earning
+the player ten points, but more frequently zero, but with the
 probability of the high payoff set to 0.1 so that the expected value
 of either choice is one point. The player has no *a priori* knowledge
-of the game, and learns of it from their experience. Some number of
+of the game, and learns of it from experience. Some number of
 virtual participants will perform this task for a fixed number of
 rounds, learning from their past experiences in earlier rounds. Then
 we’ll graph the average number of times a participant made the risky
@@ -135,9 +135,9 @@ This all that is required to be able to run our model in multiple
 processes. The :class:`IteratedExperiment` super-class will handle the partitioning
 of participants across worker processes, tell them to run, collect their
 results, all while correctly transferring information between the
-various processes and safely synchronizing their activities. When
-finished the final, aggregated result will be available using
-the :meth:`results` method.
+various processes and safely synchronizing their activities. The collected
+results will be available as the value returned by the :class:`SafeRisky`'s
+:meth:`run` method.
 
 To make use of this we will add a :func:`main` function that will
 allocate a :class:`SafeRisky` object, initialized with the desired
@@ -184,9 +184,9 @@ cores.
         exp = SafeRisky(rounds=rounds,
                         participants=participants,
                         process_count=workers)
-        exp.run()
+        results = exp.run()
         plt.plot(range(1, rounds + 1),
-                 list(sum(r[i] for r in exp.results()) / participants
+                 list(sum(r[i] for r in results) / participants
                           for i in range(rounds)))
         plt.xlabel("round")
         plt.ylim(-0.05, 1.05)
@@ -214,7 +214,7 @@ Often we want to run experiments like these with multiple, different
 conditions, such as different parameters to the models or to the
 tasks. This is facilitated by using the *conditions* slot of the
 :class:`IteratedExperiment` object, an iterable the elements of which
-are passed to the :meth:`run_participant` method in the work process.
+are passed to the :meth:`run_participant` method in the worker process.
 Note that the total number of participants is the product of
 *participants* and the number of conditions. A condition can be any
 Python value that is both hashable and
@@ -225,7 +225,9 @@ sets of conditions by using tuples of their elements.
 Here we augment the above :class:`SafeRisky` implementation to use different
 probabilities for the risky choice, for different expected values of that
 choice. The values we pass as conditions will be numbers, the desired expected
-values.
+values. At the same time we enable recording the individual choices made at each round by
+each participant in a comma separated values (CSV) file, write access to which
+is synchronized across the worker processes using the :attr:`log` property.
 
 .. code-block:: python
 
@@ -239,6 +241,11 @@ values.
     EXPECTED_VALUES = [5, 4, 3, 2, 1]
 
     class SafeRisky(IteratedExperiment):
+
+        def prepare_experiment(self, **kwargs):
+            with self.log as w:
+                if w:
+                    w.writerow("expected value,participant,round,choice,payoff".split(","))
 
         def run_participant_prepare(self, participant, condition, context):
             self.memory = pyactup.Memory()
@@ -254,22 +261,32 @@ values.
             else:
                 payoff = 0
             self.memory.learn(choice=choice, payoff=payoff)
+            with self.log as w:
+                if w:
+                    w.writerow([condition, participant, round, choice, payoff])
             return choice == "risky"
+
+
+    # Note that if run with the default 10,000 participants and 200 rounds the log file
+    # will consist of nearly 10 million lines totalling nearly 200 megabytes.
 
     @click.command()
     @click.option("--rounds", default=200, help="the number of rounds each participant plays")
     @click.option("--participants", default=10_000, help="the number of participants")
     @click.option("--workers", default=0,
                   help="number of worker processes, zero (the default) means as many as available cores")
-    def main(rounds=200, participants=10_000, workers=0):
+    @click.option("--log", help="a log file to which to write details of the experiment")
+    def main(rounds=200, participants=10_000, workers=0, log=None):
         exp = SafeRisky(rounds=rounds,
                         conditions=EXPECTED_VALUES,
                         participants=participants,
-                        process_count=workers)
-        exp.run()
+                        process_count=workers,
+                        logfile=log,
+                        csv=True)
+        results = exp.run()
         for c in exp.conditions:
             plt.plot(range(1, rounds + 1),
-                     list(sum(r[i] for r in exp.results(c)) / participants
+                     list(sum(r[i] for r in results[c]) / participants
                               for i in range(rounds)),
                      label=f"Risky EV = {c}")
         plt.legend()
@@ -278,6 +295,7 @@ values.
         plt.ylabel("fraction choosing risky")
         plt.title(f"Safe versus Risky, {participants:,d} participants")
         plt.show()
+
 
     if __name__== "__main__":
         main()
@@ -293,6 +311,24 @@ overcome its distaste for risk.
 Again on a 32 core machine, running this with ``--workers=1``, it
 requires seven minutes and forty-three seconds, but with multiple, parallel worker
 processes,``--workers=32``, only fifteen seconds.
+
+If in addition we specify a log file when running this, the first few lines of that
+log file look something like the following.
+
+.. code-block::
+
+    expected value,participant,round,choice,payoff
+    5,3,0,safe,1
+    5,3,1,risky,0
+    5,3,2,safe,1
+    5,3,3,safe,1
+    5,3,4,risky,10
+    5,3,5,risky,0
+    5,3,6,safe,1
+    5,3,7,risky,10
+    5,3,8,risky,10
+    5,3,9,risky,10
+
 
 See details of the API in the next section for other methods that can
 be overridden to hook into different parts of the process of running
@@ -319,19 +355,21 @@ Experiments
 
    .. automethod:: run
 
-   .. automethod:: results
-
    .. automethod:: run_participant
 
    .. automethod:: finish_participant
 
    .. automethod:: prepare_condition
 
+   .. automethod:: finish_condition
+
    .. automethod:: prepare_experiment
 
    .. automethod:: setup
 
    .. automethod:: finish_experiment
+
+   .. autoattribute:: log
 
 Iterated Experiments
 --------------------

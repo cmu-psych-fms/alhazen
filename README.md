@@ -39,14 +39,14 @@ you may have to modify the above in various ways
 
 If you are unable to install Alhazen as above, you can instead
 `download a tarball <https://bitbucket.org/dfmorrison/alhazen/downloads/?tab=tags>`_.
-The tarball will have a filename something like alhazen-1.2.1.tar.gz.
-Assuming this file is at ``/some/directory/alhazen-1.2.1.tar.gz`` install it by typing at the command line
+The tarball will have a filename something like alhazen-1.3.1.tar.gz.
+Assuming this file is at ``/some/directory/alhazen-1.3.1.tar.gz`` install it by typing at the command line
 
-    pip install /some/directory/alhazen-1.2.1.tar.gz
+    pip install /some/directory/alhazen-1.3.1.tar.gz
 
 Alternatively you can untar the tarball with
 
-    tar -xf /some/directory/alhazen-1.2.1.tar.gz
+    tar -xf /some/directory/alhazen-1.3.1.tar.gz
 
 and then change to the resulting directory and type
 

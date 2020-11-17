@@ -1,7 +1,7 @@
 from itertools import count
 import math
 from multiprocessing import current_process
-import pytest
+from pytest import raises
 import random
 import statistics
 import time
@@ -37,8 +37,12 @@ class Trivial(Experiment):
         self.info.append((participant, condition))
         return result
 
-    def finish_experiment(self):
+    def finish_condition(self, condition, result):
+        return result
+
+    def finish_experiment(self, result):
         self.info.append("finished")
+        return result
 
 
 def test_trivial():
@@ -47,10 +51,11 @@ def test_trivial():
     assert tr.conditions == (None,)
     assert tr.process_count > 0
     assert not tr.show_progress
-    assert tr.run(a=True, b=17) is tr
-    r = list(tr.results())
+    r = list(tr.run(a=True, b=17))
     assert len(r) == 1
     assert r[0][0] == (0, None, None, 0, 'setup called')
+    with raises(RuntimeError):
+        tr.run()
     tr = Trivial(show_progress=False,
                  conditions=(2**i for i in range(4)),
                  process_count=2,
@@ -59,11 +64,11 @@ def test_trivial():
     assert tr.conditions == (1, 2, 4, 8)
     assert tr.process_count == 2
     assert not tr.show_progress
-    assert tr.run(a=False, c=-7) is tr
+    results = tr.run(a=False, c=-7)
     result_set = set()
     process_set = set()
     for c in tr.conditions:
-        r = list(tr.results(c))
+        r = list(results[c])
         assert len(r) == 3
         for t, p in r:
             result_set.add(t)
@@ -95,13 +100,13 @@ class TrivialRandom(IteratedExperiment):
 
 
 def test_trivial_random():
-    assert len(list(TrivialRandom(show_progress=False).run().results())) == 1
-    r = list(TrivialRandom(participants=1000, rounds=100, show_progress=False).run().results())
+    results = len(list(TrivialRandom(show_progress=False).run())) == 1
+    r = list(TrivialRandom(participants=1000, rounds=100, show_progress=False).run())
     assert len(r) == 1000
     for x in r:
         assert len(x) == 100
     for n in [0, 1, 2, 3, 4, 10, 100]:
-        r = list(TrivialRandom(participants=20, rounds=10, process_count=n, show_progress=False).run().results())
+        r = list(TrivialRandom(participants=20, rounds=10, process_count=n, show_progress=False).run())
         assert len(r) == 20
         for x in r:
             assert len(x) == 10
@@ -129,10 +134,10 @@ class LogisticSampler(IteratedExperiment):
 def test_logistic_sampler():
     def execute_once(**kwargs):
         ls = LogisticSampler(participants=1000, rounds=100, show_progress=False, **kwargs)
-        ls.run()
-        for c in kwargs.get("conditions", [None]):
+        results = ls.run()
+        for c in kwargs.get("conditions"):
             width = c if c is not None else 1
-            res = list(ls.results(c))
+            res = list(results[c])
             stats = list()
             for i in range(len(res[0])):
                 mean = statistics.mean(r[i] for r in res)
@@ -142,9 +147,8 @@ def test_logistic_sampler():
                 assert width * -2 < t[0] < width * 2
             assert width * (1.9 - 2) < stats[0][1] < width * (1.9 + 2)
             assert width * (17.6 - 2) < stats[99][1] < width * (17.6 + 2)
-        with pytest.raises(KeyError):
-            ls.results(3)
-    execute_once()
+        with raises(KeyError):
+            results[3]
     execute_once(process_count=1, conditions=[2])
     execute_once(process_count=2, conditions=[1000])
     execute_once(process_count=300, conditions=[0.0001])

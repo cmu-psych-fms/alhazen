@@ -33,9 +33,9 @@ def main(rounds=200, participants=10_000, workers=0):
     exp = SafeRisky(rounds=rounds,
                     participants=participants,
                     process_count=workers)
-    exp.run()
+    results = exp.run()
     plt.plot(range(1, rounds + 1),
-             list(sum(r[i] for r in exp.results()) / participants
+             list(sum(r[i] for r in results) / participants
                       for i in range(rounds)))
     plt.xlabel("round")
     plt.ylim(-0.05, 1.05)

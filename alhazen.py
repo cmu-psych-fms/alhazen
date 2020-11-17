@@ -37,15 +37,17 @@ method.
 
 """
 
-__version__ = "1.3"
+__version__ = "1.3.1"
 
+import csv
 import os
 import queue
 import sys
 import traceback
-from multiprocessing import Process, Queue, Lock
+from collections import defaultdict
+from contextlib import contextmanager
+from multiprocessing import Lock, Process, Queue
 from typing import Any, List
-from contextlib import nullcontext
 
 from tqdm import tqdm
 
@@ -62,34 +64,62 @@ class Experiment:
     The *participants*, if supplied, it should be a positive integer, the number of
     virtual participants to run. If not supplied it defaults to 1.
 
-    The *conditions*, if supplied, should be an iterable of values that are both hashable
-    and `picklable <https://docs.python.org/3.7/library/pickle.html#pickle-picklable>`_.
-    These denote different conditions in which the task of the :class:`Experiment` should
-    be run, and all *participants* are run once against each condition. Multiple,
-    orthogonal sets of conditions are often most easily represented as tuples of elements
-    of the underlying individual sets of conditions.
+    The *conditions*, if supplied, it should be an iterable of values that are both
+    hashable and `picklable
+    <https://docs.python.org/3.7/library/pickle.html#pickle-picklable>`_. These denote
+    different conditions in which the task of the :class:`Experiment` should be run, and
+    all *participants* are run once against each condition. Multiple, orthogonal sets of
+    conditions are often most easily represented as tuples of elements of the underlying
+    individual sets of conditions.
 
-    The *process_count*, if supplied, should be a non-negative integer. If non-zero it
-    is the number of worker processes to use. Note that the overall program will actually
+    The *process_count*, if supplied, should be a non-negative integer. If non-zero it is
+    the number of worker processes to use. Note that the overall program will actually
     contain one more process than this, the control process, which is also the main
     process in which the :class:`Experiment`'s :meth:`run` method is called. If
-    *process_count* is zero (the default if not supplied) it indicates that the number
-    of worker processes to be used should be the number of cores available, as determined
-    by Python's ``os`` module. Note that on Intel processors supporting them this count
-    will include the "virtual" cores supplied by
-    `Hyper-threading <https://en.wikipedia.org/wiki/Hyper-threading>`_. In this case it
-    may sometimes be advantageous to use a lower number.
-
-    TODO document logfile
+    *process_count* is zero (the default if not supplied) it indicates that the number of
+    worker processes to be used should be the number of cores available, as determined by
+    Python's ``os`` module. Note that on processors supporting SMT this count may include
+    the "virtual" cores supplied by `simultaneous mutlithreading
+    <https://en.wikipedia.org/wiki/Simultaneous_multithreading>`_. In this case it may
+    sometimes be advantageous to use a lower number.
 
     By default when an :class:`Experiment` is running a
     `tqdm <https://tqdm.github.io/>`_ progress indicator is shown, advanced as each task
     is completed. This may be suppressed by setting *show_progress* to ``False``.
 
+    Because participants are typically run in multiple processes, if they all want to
+    write to a single log file access to that file must be synchronized. Alhazen supplies
+    a mechanism to more easily facilitate this in easy cases. A file name can be supplied
+    as a value of the *logfile* parameter, in which case it names a file that will be
+    opened for writing when the experiment is run, and closed when it finishes. Within the
+    various methods the programmer overrides that file can be accessed using the
+    :attr:`log` context manager, which ensure synchronization and make available the file.
+    If preferred, *logname* can also be set to a file already open for writing, and access
+    to it will be similarly synchronized.
+
+    It is frequently useful to write log files as Comma Separated Values (CSV) files. The
+    *logfile* will be wrapped with a Python :class:`csv.writer` if *csv* is not false.
+    If *csv* is a string it should be a CSV dialect. If it is ``True`` the `excel` dialect
+    will be used. To use a :class:`csv.DictWriter` supply the *fieldnames*. In this case
+    the *restval* and *extrasaction* parameters can be used to pass these extra parameters
+    to the :class:`csv.DictWriter`. Note that if an already open file is used as *logfile*
+    with a CSV writer, unless that file was opened with ``newline=""`` newlines embedded
+    in CSV values may be misformatted; see
+    `the Python csv  documentation <https://docs.python.org/3/library/csv.html>`_ for
+    details.
     """
 
-    def __init__(self, participants=1, conditions=None, process_count=0,
-                 show_progress=True, logfile=None):
+    def __init__(self,
+                 participants=1,
+                 conditions=None,
+                 process_count=0,
+                 show_progress=True,
+                 logfile=None,
+                 csv=None,
+                 fieldnames=[],
+                 restval="",
+                 extrasaction="raise"):
+        self._has_been_run = False
         self._participants = participants
         # The following disjunction is in case conditions is an iterator returning no objects;
         # such an iterator is truthy, but results in an empty tuple.
@@ -98,7 +128,21 @@ class Experiment:
                                   (participants * len(self._conditions)))
         self._show_progress = show_progress
         self._results = {c: [None] * participants for c in self._conditions}
+        self._task_q = Queue()
+        self._result_q = Queue()
         self._logfile = logfile
+        self._logfile_opened = False
+        self._logwriter = None
+        self._loglock = Lock()
+        if isinstance(csv, str):
+            self._csv = csv
+        elif bool(csv) or fieldnames:
+            self._csv = "excel"
+        else:
+            self._csv = None
+        self._fieldnames = fieldnames
+        self._restval = restval
+        self._extrasaction = extrasaction
 
     @property
     def participants(self):
@@ -133,11 +177,6 @@ class Experiment:
         :class:`Experiment` is created.
         """
         return self._show_progress
-
-    @property
-    def logfile(self):
-        """TODO"""
-        return self._logfile
 
     def prepare_experiment(self, **kwargs):
        """The control process calls this method, once, before any of the other methods in
@@ -209,38 +248,45 @@ class Experiment:
 
     def finish_participant(self, participant, condition, result):
         """The control process calls this method after each participant's task has been
-        completed by a worker process. Passed as *results* is the value returned by the
+        completed by a worker process. Passed as *result* is the value returned by the
         :meth:`run_participant` method in the worker process, or ``None`` if no value was
-        returned. The value returned by this method, of None if none is returned, is
-        stored for retrieval by the :meth:`results` method. The :meth:`finish_participant`
-        method is intended to be overridden in subclasses, and should not be called
-        directly by the programmer. The default implementation of this method returns
-        the value of its *result* parameter unchanged.
-
+        returned. The value returned by this method, or ``None`` if none is returned, is
+        stored for passing to the :meth:`finish_condition` method when it is eventually
+        called.. The :meth:`finish_participant` method is intended to be overridden in
+        subclasses, and should not be called directly by the programmer. The default
+        implementation of this method returns the value of its *result* parameter
+        unchanged.
         """
         return result
 
-    def finish_experiment(self):
+    def finish_condition(self, condition, results):
+        """The control process calls this method after all the participant's performing
+        the task in a particular condition have finished and :meth:`finish_participant`
+        has been called for them. This method is called only once for each condition.
+        Passed as *results* is a list of results returned by the calls of the
+        :meth:`finish_particpant` method. The value returned by this method, or ``None``
+        if none is returned, is stored for passing to :meth:`finish_experiment` when the
+        tasks for all conditions have been finished. The :meth:`finish_condition` method
+        is intended to be overridden in subclasses, and should not be called directly by
+        the programmer. The default implementation of this method returns the value of its
+        *results* parameter unchanged.
+        """
+        return results
+
+    def finish_experiment(self, results):
         """The control process calls this method, once, after all the participants have
         been run in each of the conditions, and the corresponding calls to
-        :meth:`finish_participant` have all completed. This method is intended to be
-        overridden in subclasses, and should not be called directly by the programmer. The
-        default implementation of this method does nothing.
+        :meth:`finish_condition` have all completed. This method is intended to be
+        overridden in subclasses, and should not be called directly by the programmer.
+        Passed as *results* is a dictionary indexed by the experiments conditions, the
+        values being the corresponding value returned by the call to
+        :meth:`finish_condition`. The value returned by this method, or ``None`` if none
+        is returned, is returned by the :class:`Experiment`'s :meth:`run` method. The
+        :meth:`finish_exerpiment` method is intended to be overridden in subclasses, and
+        should not be called directly by the programmer. The default implementation of
+        this method returns *results* unchanged.
         """
-        pass
-
-    def results(self, condition=None):
-        """The method is called by the programmer, and runs in the control process. It
-        returns an iterator, ordered by participant number, of the results returned by
-        :meth:`finish_participant`. If that method has not be overridden those will be the
-        values returned by :meth:`run_participant`. If called before the experiment ends
-        the iterator may return zero results, or fewer results than the number of
-        participants, only those that have so far been processed. Raises a :exc:`KeyError`
-        if *condition* is not a condition in this :class:`Experiment`.
-        """
-        # TODO Figure how best to prohibit running this in a worker process, and improve
-        #      the above documentation.
-        return (r for r in self._results[condition])
+        return results
 
     def run(self, **kwargs):
         """This method is called by the programmer to begin processing of the various
@@ -252,28 +298,41 @@ class Experiment:
         Typically other methods are overridden to aggregate the results of these tasks,
         and possibly to setup data structures and other state required by them. If any
         keyword arguments are supplied when calling :meth:`run` they are passed to the
-        :class:`Experiment`'s :meth:`prepare_experiment` method. Returns this
-        :class:`Experiment`.
+        :class:`Experiment`'s :meth:`prepare_experiment` method. Returns the value
+        returned by the :meth:`finish_experiment` method, or ``None``.
         """
+        if self._has_been_run:
+            raise RuntimeError(f"This Experiment has already been run")
+        self._has_been_run = True
         total_tasks = self._participants * len(self._conditions)
-        self._log_lock = Lock()
-        with open(self._logfile, "w") if self._logfile else nullcontext() as self._open_log:
+        try:
+            if self._logfile:
+                try:
+                    self._logfile = open(self._logfile, "w",
+                                         newline=("" if self._csv or self._fieldnames else None))
+                    self._logfile_opened = True
+                except TypeError:
+                    pass
+                if self._fieldnames:
+                    self._logwriter = csv.Dictwriter(self._logfile,
+                                                     self._fieldnames,
+                                                     restval=self._restval,
+                                                     extrasaction=self._extrasaction,
+                                                     dialect=self._csv)
+                elif self._csv:
+                    self._logwriter = csv.writer(self._logfile, dialect=self._csv)
             self.prepare_experiment(**kwargs)
-            task_q = Queue()
-            result_q = Queue()
-            processes = [ Process(target=self._run_one,
-                                  args=[task_q, result_q, self._log_lock, self._open_log])
-                          for i in range(self._process_count) ]
+            processes = [ Process(target=self._run_one) for i in range(self._process_count) ]
             for p in processes:
                 p.start()
             try:
                 tasks = ((c, p) for c in self._conditions for p in range(self._participants))
                 tasks_completed = 0
+                condition_completions = defaultdict(int)
                 self._progress = self._show_progress and tqdm(total=total_tasks)
                 condition_context = None
                 current_condition = None
                 participant = None
-                results = { c: [None] * self._participants for c in self._conditions }
                 blocking = False
                 while tasks_completed < total_tasks:
                     did_something = False
@@ -290,16 +349,20 @@ class Experiment:
                         participant_context = dict(condition_context)
                         self.prepare_participant(participant, condition, participant_context)
                         try:
-                            task_q.put((participant, condition, participant_context), blocking, TIMEOUT)
+                            self._task_q.put((participant, condition, participant_context), blocking, TIMEOUT)
                             participant = None
                         except queue.Full:
                             pass
                         did_something = True
                     while True:
                         try:
-                            p, c, result = result_q.get(blocking, TIMEOUT)
+                            p, c, result = self._result_q.get(blocking, TIMEOUT)
                             self._results[c][p] = self.finish_participant(p, c, result)
                             tasks_completed += 1
+                            condition_completions[c] += 1
+                            assert condition_completions[c] <= self._participants
+                            if condition_completions[c] == self._participants:
+                                self._results[c] = self.finish_condition(c, self._results[c])
                             did_something = True
                             if self._progress:
                                 self._progress.update()
@@ -307,46 +370,56 @@ class Experiment:
                             break
                     blocking = not did_something
                 for i in range(len(processes)):
-                    task_q.put((None, None, None))
-                self.finish_experiment()
+                    self._task_q.put((None, None, None))
+                self._results = self.finish_experiment(self._results)
                 for p in processes:
                     p.join()
             except:
                 traceback.print_exc()
                 for p in processes:
                     try:
-                        p.terminate
+                        p.terminate()
                     except:
                         traceback.print_exc()
             finally:
-                result_q.close()
-                task_q.close()
+                self._result_q.close()
+                self._task_q.close()
                 if self._progress:
                     self._progress.close()
-        return self
+            return self._results if self._conditions != (None,) else self._results[None]
+        finally:
+            if self._logfile_opened:
+                self._logfile.close()
 
-    def _run_one(self, task_q, result_q, lock, file):
+    def _run_one(self):
         # called in the child processes
-        self._log_lock = lock
-        self._open_log = file
         try:
             self.setup()
             while True:
-                participant, condition, context = task_q.get()
+                participant, condition, context = self._task_q.get()
                 if participant is None:
                     break
                 result = self.run_participant(participant, condition, context)
-                result_q.put((participant, condition, result))
+                self._result_q.put((participant, condition, result))
         except:
             traceback.print_exc()
             sys.exit(1)
 
-    def log(self, *objects, sep="", end="\n"):
-        """TODO"""
-        # note: writes to stdout if no log file
-        with self._log_lock:
-            print(*objects, sep=sep, end=end, file=self._open_log, flush=True)
+    @property
+    @contextmanager
+    def log(self):
+        """A context manager holding a lock to synchronize writing to this
+        :class:`Experiment`'s log file. When this context manager is used in a
+        ``with...as`` statement it in turn returns either the log file, or, if a CSV
+        writer is being used, that writer. If there is no log file, that ``as`` variable
+        is set to ``None``. For example,
 
+        with self.log as writer:
+            writer.writerow([field, another_field])
+
+        """
+        with self._loglock:
+            yield self._logwriter or self._logfile
 
 
 class IteratedExperiment(Experiment):
@@ -425,28 +498,30 @@ class IteratedExperiment(Experiment):
         invocations of :meth:`run_participant_run` or :meth:`run_participant_continue` are
         retained in the *context* presented to this method, and any changes this method
         makes to its *context* are propogated to future calls of
-        :meth:`run_participant_continue`, :meth:`run_participant_run` and
-        :meth:`run_participant_finish` by this participant in this condition, but not to
-        any others. This method should return a
-        `picklable <https://docs.python.org/3.7/library/pickle.html#pickle-picklable>`_
-        value which will be collected into a list which list will be the value returned to
-        the control process for this participant and condition. This method is intended to
-        be overridden in subclasses, and should not be called directly by the programmer.
-        The default implementation of this method raises a :exc:`NotImplementedError`.
+        :meth:`run_participant_continue` and :meth:`run_participant_run` by this
+        participant in this condition, but not to any others. The value returned by this
+        method, or ``None`` if no value is returne, is collected into a list with other
+        return values of this method for other rounds by this participant in this
+        condition, which list is eventually passed to the :meth:`run_particiapnt_finish`
+        method. This method must be overridden by subclasses, and should not be called
+        directly by the programmer. The default implementation of this method raises a
+        :exc:`NotImplementedError`.
         """
         raise NotImplementedError("The run_participant_run() method must be overridden")
 
-    def run_participant_finish(self, participant, condition, context):
+    def run_participant_finish(self, participant, condition, results):
         """This method is called after all the rounds for a participant in a condition
-        have been executed. The *participant*, *condition* and *context* are as for
-        :meth:`run_participant`. Any changes made to the *context* by
-        :meth:`run_participant_prepare` or by previous invocations of
-        :meth:`run_participant_run` or :meth:`run_participant_continue` are retained in
-        the *context* presented to this method This method is intended to be overridden in
-        subclasses, and should not be called directly by the programmer. The default
-        implementation of this method does nothing.
+        have been executed. The *participant* and *condition* are as for
+        :meth:`run_participant`. Passed as *results* is a list of the values returned by
+        the successive invoations of the :meth:`run_participant_run` method, indexable by
+        round. This method should return a `picklable
+        <https://docs.python.org/3.7/library/pickle.html#pickle-picklable>`_ value which
+        will be returned to the control process for this participant and condition. This
+        method is intended to be overridden in subclasses, and should not be called
+        directly by the programmer. The default implementation of this method returns
+        *results* unchanged.
         """
-        pass
+        return results
 
     def run_participant(self, participant, condition, context):
         results = []
@@ -456,4 +531,4 @@ class IteratedExperiment(Experiment):
                 break
             results.append(self.run_participant_run(round, participant, condition, context))
         self.run_participant_finish(participant, condition, context)
-        return tuple(results)
+        return self.run_participant_finish(participant, condition, results)
