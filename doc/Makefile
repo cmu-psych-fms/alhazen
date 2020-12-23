@@ -8,14 +8,13 @@ SPHINXBUILD   ?= sphinx-build
 SOURCEDIR     = .
 BUILDDIR      = _build
 
-# Put it first so that "make" without argument is like "make help".
+all: clean html
+	cd _build/ ; zip -r alhazen-documentation.zip html --exclude=html/_sources/* 
+
 help:
 	@$(SPHINXBUILD) -M help "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
 
 .PHONY: help Makefile
-
-all: html
-	cd _build/ ; tar -cJf alhazen-documentation.txz --exclude=_sources html
 
 # Catch-all target: route all unknown targets to Sphinx using the new
 # "make mode" option.  $(O) is meant as a shortcut for $(SPHINXOPTS).

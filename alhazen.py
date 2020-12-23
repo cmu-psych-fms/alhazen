@@ -37,7 +37,7 @@ method.
 
 """
 
-__version__ = "1.3.2.dev1"
+__version__ = "1.3.2"
 
 import csv
 import os
@@ -49,9 +49,17 @@ from contextlib import contextmanager
 from multiprocessing import Lock, Process, Queue
 from typing import Any, List
 
+import psutil
 from tqdm import tqdm
 
 TIMEOUT = 0.08
+
+
+def _available_processors():
+    try:
+        return psutil.cpu_count(logical=False)
+    except Exception:
+        return 4
 
 
 class Experiment:
@@ -76,12 +84,14 @@ class Experiment:
     the number of worker processes to use. Note that the overall program will actually
     contain one more process than this, the control process, which is also the main
     process in which the :class:`Experiment`'s :meth:`run` method is called. If
-    *process_count* is zero (the default if not supplied) it indicates that the number of
-    worker processes to be used should be the number of cores available, as determined by
-    Python's ``os`` module. Note that on processors supporting SMT this count may include
-    the "virtual" cores supplied by `simultaneous mutlithreading
-    <https://en.wikipedia.org/wiki/Simultaneous_multithreading>`_. In this case it may
-    sometimes be advantageous to use a lower number.
+    *process_count* is zero (the default if not supplied) it indicates that Alhazen should
+    attempt to determine the number of cores available and use this number of worker
+    processes. For various reasons this determination may be inaccurate, so if you know
+    by other means what will work best for your experiment it may be better to supply it
+    explicitly. Note also that this determination is of physical cores, ignoring any
+    virtual ones supplied by `simultaneous mutlithreading
+    <https://en.wikipedia.org/wiki/Simultaneous_multithreading>`_. If such a determination
+    cannot be made a default of 4 is used.
 
     By default when an :class:`Experiment` is running a
     `tqdm <https://tqdm.github.io/>`_ progress indicator is shown, advanced as each task
@@ -124,7 +134,7 @@ class Experiment:
         # The following disjunction is in case conditions is an iterator returning no objects;
         # such an iterator is truthy, but results in an empty tuple.
         self._conditions = (tuple(conditions) or (None,)) if conditions else (None,)
-        self._process_count = min((process_count or len(os.sched_getaffinity(0))),
+        self._process_count = min((process_count or _available_processors()),
                                   (participants * len(self._conditions)))
         self._show_progress = show_progress
         self._results = {c: [None] * participants for c in self._conditions}
