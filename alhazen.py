@@ -37,7 +37,7 @@ method.
 
 """
 
-__version__ = "1.3.2"
+__version__ = "1.3.3.dev1"
 
 import csv
 import os
@@ -103,20 +103,15 @@ class Experiment:
     as a value of the *logfile* parameter, in which case it names a file that will be
     opened for writing when the experiment is run, and closed when it finishes. Within the
     various methods the programmer overrides that file can be accessed using the
-    :attr:`log` context manager, which ensure synchronization and make available the file.
-    If preferred, *logname* can also be set to a file already open for writing, and access
-    to it will be similarly synchronized.
+    :attr:`log` context manager, which ensures synchronization and makes available the
+    file. 
 
     It is frequently useful to write log files as Comma Separated Values (CSV) files. The
     *logfile* will be wrapped with a Python :class:`csv.writer` if *csv* is not false.
     If *csv* is a string it should be a CSV dialect. If it is ``True`` the `excel` dialect
     will be used. To use a :class:`csv.DictWriter` supply the *fieldnames*. In this case
     the *restval* and *extrasaction* parameters can be used to pass these extra parameters
-    to the :class:`csv.DictWriter`. Note that if an already open file is used as *logfile*
-    with a CSV writer, unless that file was opened with ``newline=""`` newlines embedded
-    in CSV values may be misformatted; see
-    `the Python csv  documentation <https://docs.python.org/3/library/csv.html>`_ for
-    details.
+    to the :class:`csv.DictWriter`.
     """
 
     def __init__(self,
@@ -140,7 +135,8 @@ class Experiment:
         self._results = {c: [None] * participants for c in self._conditions}
         self._task_q = Queue()
         self._result_q = Queue()
-        self._logfile = logfile
+        self._logfile_name = logfile or os.devnull
+        self._logfile = None
         self._logfile_opened = False
         self._logwriter = None
         self._loglock = Lock()
@@ -316,25 +312,16 @@ class Experiment:
         self._has_been_run = True
         total_tasks = self._participants * len(self._conditions)
         try:
-            if self._logfile:
-                try:
-                    self._logfile = open(self._logfile, "w",
-                                         newline=("" if self._csv or self._fieldnames else None))
-                    self._logfile_opened = True
-                except TypeError:
-                    pass
-                if self._fieldnames:
-                    self._logwriter = csv.Dictwriter(self._logfile,
-                                                     self._fieldnames,
-                                                     restval=self._restval,
-                                                     extrasaction=self._extrasaction,
-                                                     dialect=self._csv)
-                elif self._csv:
-                    self._logwriter = csv.writer(self._logfile, dialect=self._csv)
+            with open(self._logfile_name, "w"):
+                # zaps any existing file
+                pass
+            self._open_log()
             self.prepare_experiment(**kwargs)
+            self._close_log()
             processes = [ Process(target=self._run_one) for i in range(self._process_count) ]
             for p in processes:
                 p.start()
+            self._open_log()
             try:
                 tasks = ((c, p) for c in self._conditions for p in range(self._participants))
                 tasks_completed = 0
@@ -398,12 +385,30 @@ class Experiment:
                     self._progress.close()
             return self._results if self._conditions != (None,) else self._results[None]
         finally:
-            if self._logfile_opened:
-                self._logfile.close()
+            self._close_log()
+
+    def _open_log(self):
+        self._logfile = open(self._logfile_name, "a",
+                             newline=("" if self._csv or self._fieldnames else None))
+        self._logfile_opened = True
+        if self._fieldnames:
+            self._logwriter = csv.Dictwriter(self._logfile,
+                                             self._fieldnames,
+                                             restval=self._restval,
+                                             extrasaction=self._extrasaction,
+                                             dialect=self._csv)
+        elif self._csv:
+            self._logwriter = csv.writer(self._logfile, dialect=self._csv)
+
+    def _close_log(self):
+        if self._logfile_opened:
+            self._logfile.close()
+            self._logfile_opened = False
 
     def _run_one(self):
         # called in the child processes
         try:
+            self._open_log()
             self.setup()
             while True:
                 participant, condition, context = self._task_q.get()
@@ -414,6 +419,8 @@ class Experiment:
         except:
             traceback.print_exc()
             sys.exit(1)
+        finally:
+            self._close_log()
 
     @property
     @contextmanager
@@ -421,8 +428,7 @@ class Experiment:
         """A context manager holding a lock to synchronize writing to this
         :class:`Experiment`'s log file. When this context manager is used in a
         ``with...as`` statement it in turn returns either the log file, or, if a CSV
-        writer is being used, that writer. If there is no log file, that ``as`` variable
-        is set to ``None``. For example,
+        writer is being used, that writer. For example,
 
         with self.log as writer:
             writer.writerow([field, another_field])
