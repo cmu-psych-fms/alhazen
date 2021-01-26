@@ -37,7 +37,7 @@ method.
 
 """
 
-__version__ = "1.3.3.dev1"
+__version__ = "1.3.3.dev2"
 
 import csv
 import os
@@ -404,6 +404,7 @@ class Experiment:
         if self._logfile_opened:
             self._logfile.close()
             self._logfile_opened = False
+        self._logfile = None
 
     def _run_one(self):
         # called in the child processes
@@ -436,6 +437,7 @@ class Experiment:
         """
         with self._loglock:
             yield self._logwriter or self._logfile
+            self._logfile.flush()
 
 
 class IteratedExperiment(Experiment):
