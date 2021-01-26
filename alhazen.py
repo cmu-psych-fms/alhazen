@@ -1,4 +1,4 @@
-# Copyright (c) 2020 Carnegie Mellon University
+# Copyright (c) 2020-2021 Carnegie Mellon University
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of this
 # software and associated documentation files (the "Software"), to deal in the Software
@@ -37,7 +37,7 @@ method.
 
 """
 
-__version__ = "1.3.3.dev2"
+__version__ = "1.3.3"
 
 import csv
 import os
@@ -104,7 +104,8 @@ class Experiment:
     opened for writing when the experiment is run, and closed when it finishes. Within the
     various methods the programmer overrides that file can be accessed using the
     :attr:`log` context manager, which ensures synchronization and makes available the
-    file. 
+    file. If no *logfile* is supplied or it is None, the context manager returns a file
+    that is a sink; that is, in this case writing to this file simply discards the output.
 
     It is frequently useful to write log files as Comma Separated Values (CSV) files. The
     *logfile* will be wrapped with a Python :class:`csv.writer` if *csv* is not false.

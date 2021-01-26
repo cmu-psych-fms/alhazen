@@ -29,8 +29,7 @@ class SafeRisky(IteratedExperiment):
             payoff = 0
         self.memory.learn(choice=choice, payoff=payoff)
         with self.log as w:
-            if w:
-                w.writerow([condition, participant, round, choice, payoff])
+            w.writerow([condition, participant, round, choice, payoff])
         return choice == "risky"
 
 

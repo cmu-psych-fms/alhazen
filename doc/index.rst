@@ -1,4 +1,4 @@
-Alhazen version 1.3.2
+Alhazen version 1.3.3
 *********************
 
 .. toctree::
@@ -41,14 +41,14 @@ you may have to modify the above in various ways
 
 If you are unable to install Alhazen as above, you can instead
 `download a tarball <https://bitbucket.org/dfmorrison/alhazen/downloads/?tab=tags>`_.
-The tarball will have a filename something like alhazen-1.3.1.tar.gz.
-Assuming this file is at ``/some/directory/alhazen-1.3.1.tar.gz`` install it by typing at the command line
+The tarball will have a filename something like alhazen-1.3.3.tar.gz.
+Assuming this file is at ``/some/directory/alhazen-1.3.3.tar.gz`` install it by typing at the command line
 
-  .. parsed-literal:: pip install /some/directory/alhazen-1.3.1.tar.gz
+  .. parsed-literal:: pip install /some/directory/alhazen-1.3.3.tar.gz
 
 Alternatively you can untar the tarball with
 
-  .. parsed-literal:: tar -xf /some/directory/alhazen-1.3.1.tar.gz
+  .. parsed-literal:: tar -xf /some/directory/alhazen-1.3.3.tar.gz
 
 and then change to the resulting directory and type
 
@@ -262,8 +262,7 @@ is synchronized across the worker processes using the :attr:`log` property.
                 payoff = 0
             self.memory.learn(choice=choice, payoff=payoff)
             with self.log as w:
-                if w:
-                    w.writerow([condition, participant, round, choice, payoff])
+                w.writerow([condition, participant, round, choice, payoff])
             return choice == "risky"
 
 
