@@ -1,4 +1,4 @@
-# Copyright (c) 2020-2021 Carnegie Mellon University
+# Copyright (c) 2020-2022 Carnegie Mellon University
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of this
 # software and associated documentation files (the "Software"), to deal in the Software
@@ -37,7 +37,7 @@ method.
 
 """
 
-__version__ = "1.3.3"
+__version__ = "1.3.4"
 
 import csv
 import os
@@ -285,7 +285,7 @@ class Experiment:
         been run in each of the conditions, and the corresponding calls to
         :meth:`finish_condition` have all completed. This method is intended to be
         overridden in subclasses, and should not be called directly by the programmer.
-        Passed as *results* is a dictionary indexed by the experiments conditions, the
+        Passed as *results* is a dictionary indexed by the experiment's conditions, the
         values being the corresponding value returned by the call to
         :meth:`finish_condition`. The value returned by this method, or ``None`` if none
         is returned, is returned by the :class:`Experiment`'s :meth:`run` method. The
@@ -443,7 +443,7 @@ class Experiment:
 
 class IteratedExperiment(Experiment):
     """This is a an abstract base class, a subclass of :class:`Experiment`, for
-    experiements where each participant performaces sequence of identical or similar
+    experiements where each participant performs a sequence of identical or similar
     actions, one per round. The *rounds* is the maximum number of rounds that will be
     executted. If :meth:`run_participant_continue` is overriden is is possible that fewer
     than *rounds* rounds will be executed. The *rounds* should be a positive integer, and,
@@ -457,7 +457,7 @@ class IteratedExperiment(Experiment):
     process: :meth:`run_participant_prepare`, :meth:`run_participant_run`,
     :meth:`run_participant_continue`, and :meth:`run_participant_finish`, all inteded for
     overriding. The programmer must override at least :meth:`run_participant_run`, which
-    is called repeated, once for each round, and should return a
+    is called repeatedly, once for each round, and should return a
     `picklable <https://docs.python.org/3.7/library/pickle.html#pickle-picklable>`_ value
     which which is accumlated into a list, indexed by round. This list is returned to the
     parent, control process as the result for the participant and condition.
@@ -494,8 +494,8 @@ class IteratedExperiment(Experiment):
         """This method is called in a worker process before each call of
         :meth:`run_participant_run`. If it returns ``True`` (or any truthy value) the
         iterations continue and :meth:`run_participant_run` is called. If it returns
-        ``False`` (or any falsey value) this participants activities in this condition end
-        with no more rounds. The values of *round*, *participant*, *condition* and
+        ``False`` (or any falsey value) this participant's activities in this condition
+        end with no more rounds. The values of *round*, *participant*, *condition* and
         *context* are as for :meth:`run_participant_run`. Any changes made to the
         *context* by :meth:`run_participant_prepare` or by previous invocations of
         :meth:`run_participant_run` or :meth:`run_participant_continue` are retained in
@@ -511,16 +511,16 @@ class IteratedExperiment(Experiment):
     def run_participant_run(self, round, participant, condition, context):
         """This method should be overriden to perform one round's worth of activity by the
         participant, in a worker process. The *round* is a non-negative integer which
-        round this is; it starts at zero and increases by one at each iteration. The
-        *participant*, *condition* and *context* are as for :meth:`run_participant`. Any
-        changes made to the *context* by :meth:`run_participant_prepare` or by previous
-        invocations of :meth:`run_participant_run` or :meth:`run_participant_continue` are
-        retained in the *context* presented to this method, and any changes this method
-        makes to its *context* are propogated to future calls of
-        :meth:`run_participant_continue` and :meth:`run_participant_run` by this
-        participant in this condition, but not to any others. The value returned by this
-        method, or ``None`` if no value is returne, is collected into a list with other
-        return values of this method for other rounds by this participant in this
+        describes round this is; it starts at zero and increases by one at each iteration.
+        The *participant*, *condition* and *context* are as for :meth:`run_participant`.
+        Any changes made to the *context* by :meth:`run_participant_prepare` or by
+        previous invocations of :meth:`run_participant_run` or
+        :meth:`run_participant_continue` are retained in the *context* presented to this
+        method, and any changes this method makes to its *context* are propogated to
+        future calls of :meth:`run_participant_continue` and :meth:`run_participant_run`
+        by this participant in this condition, but not to any others. The value returned
+        by this method, or ``None`` if no value is returne, is collected into a list with
+        other return values of this method for other rounds by this participant in this
         condition, which list is eventually passed to the :meth:`run_particiapnt_finish`
         method. This method must be overridden by subclasses, and should not be called
         directly by the programmer. The default implementation of this method raises a

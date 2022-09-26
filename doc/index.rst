@@ -1,4 +1,4 @@
-Alhazen version 1.3.3
+Alhazen version 1.3.4
 *********************
 
 .. toctree::
@@ -41,14 +41,14 @@ you may have to modify the above in various ways
 
 If you are unable to install Alhazen as above, you can instead
 `download a tarball <https://bitbucket.org/dfmorrison/alhazen/downloads/?tab=tags>`_.
-The tarball will have a filename something like alhazen-1.3.3.tar.gz.
-Assuming this file is at ``/some/directory/alhazen-1.3.3.tar.gz`` install it by typing at the command line
+The tarball will have a filename something like alhazen-1.3.4.tar.gz.
+Assuming this file is at ``/some/directory/alhazen-1.3.4.tar.gz`` install it by typing at the command line
 
-  .. parsed-literal:: pip install /some/directory/alhazen-1.3.3.tar.gz
+  .. parsed-literal:: pip install /some/directory/alhazen-1.3.4.tar.gz
 
 Alternatively you can untar the tarball with
 
-  .. parsed-literal:: tar -xf /some/directory/alhazen-1.3.3.tar.gz
+  .. parsed-literal:: tar -xf /some/directory/alhazen-1.3.4.tar.gz
 
 and then change to the resulting directory and type
 
@@ -79,7 +79,7 @@ participants’ actions will be decided by an
 `Instance Based Learning <https://www.sciencedirect.com/science/article/abs/pii/S0364021303000314>`_
 model, written using `PyACTUp <https://halle.psy.cmu.edu/pyactup/>`_.
 
-First we start by make a subclass of the Alhazen
+First we start by making a subclass of the Alhazen
 :class:`IteratedExperiment` class, and override its
 :meth:`run_participant_prepare` method to allocate for each
 participant a PyACTUp ``Memory`` object. This method will be called
@@ -88,7 +88,7 @@ within a worker process, and for this example we will ignore the
 
 .. code-block:: python
 
-    from alhazen import Experiment
+    from alhazen import IteratedExperiment
     import pyactup
 
     class SafeRisky(IteratedExperiment):
