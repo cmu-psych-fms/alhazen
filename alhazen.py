@@ -48,6 +48,7 @@ from collections import defaultdict
 from contextlib import contextmanager
 from multiprocessing import Lock, Process, Queue
 from typing import Any, List
+from warnings import warn
 
 import psutil
 from tqdm import tqdm
@@ -107,12 +108,17 @@ class Experiment:
     file. If no *logfile* is supplied or it is None, the context manager returns a file
     that is a sink; that is, in this case writing to this file simply discards the output.
 
+    However, this ability to synchronize log files is not supported on Windows. Supplying
+    value for *logfile* on Windows will result in a warning being displayed, and the value
+    will bit ignored.
+
     It is frequently useful to write log files as Comma Separated Values (CSV) files. The
     *logfile* will be wrapped with a Python :class:`csv.writer` if *csv* is not false.
     If *csv* is a string it should be a CSV dialect. If it is ``True`` the `excel` dialect
     will be used. To use a :class:`csv.DictWriter` supply the *fieldnames*. In this case
     the *restval* and *extrasaction* parameters can be used to pass these extra parameters
     to the :class:`csv.DictWriter`.
+
     """
 
     def __init__(self,
@@ -136,6 +142,10 @@ class Experiment:
         self._results = {c: [None] * participants for c in self._conditions}
         self._task_q = Queue()
         self._result_q = Queue()
+        if logfile and (sys.platform.startswith("windows") or
+                        sys.platform.startswith("cygwin")):
+            warn("Logfiles in Alhazen are not supported in Windows", RuntimeWarning)
+            logfile = None
         self._logfile_name = logfile or os.devnull
         self._logfile = None
         self._logfile_opened = False
