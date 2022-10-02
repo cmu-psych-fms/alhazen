@@ -1,3 +1,23 @@
+# Copyright (c) 2020-2022 Carnegie Mellon University
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy of this
+# software and associated documentation files (the "Software"), to deal in the Software
+# without restriction, including without limitation the rights to use, copy, modify,
+# merge, publish, distribute, sublicense, and/or sell copies of the Software, and to
+# permit persons to whom the Software is furnished to do so, subject to the following
+# conditions:
+#
+# The above copyright notice and this permission notice shall be included in all copies
+# or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+# PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+# HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF
+# CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE
+# OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+from collections import defaultdict
 from itertools import count
 import math
 from multiprocessing import current_process
@@ -7,8 +27,6 @@ import statistics
 import time
 
 from alhazen import *
-
-# TODO add tests that exercise run_participant_continue() and run_participant_finish()
 
 
 class Trivial(Experiment):
@@ -30,6 +48,11 @@ class Trivial(Experiment):
         context["p"] = participant * 7
 
     def run_participant(self, participant, condition, context):
+        fuck = False
+        with self.log as logwriter:
+            fuck = True
+            logwriter.write(f"{participant}{condition}{context['c']}{context['p']}")
+        assert fuck
         return ((participant, condition, context["c"], context["p"], self.setup_called),
                 current_process().name)
 
@@ -87,6 +110,15 @@ def test_trivial():
                           (2, 2, 6, 14, "setup called")}
     assert len(process_set) == 2
 
+def test_log(tmp_path):
+    p = tmp_path / "log.txt"
+    tr = Trivial(show_progress=False,
+                 conditions="abc",
+                 participants=3,
+                 logfile=p).run()
+    with open(p) as f:
+        assert len(f.readline()) == 57
+
 
 class TrivialRandom(IteratedExperiment):
 
@@ -98,13 +130,24 @@ class TrivialRandom(IteratedExperiment):
     def run_participant_run(self, round, participant, condition, context):
         return random.randint(0, 10**60)   # should be conflict-free :-)
 
+    def run_participant_continue(self, round, participant, condition, context):
+        return round < 50 or participant % 2 == 0
+
+    def run_participant_finish(self, participant, condition, results):
+        return results[0:90] if results and participant % 10 == 0 else results
+
 
 def test_trivial_random():
-    results = len(list(TrivialRandom(show_progress=False).run())) == 1
+    assert len(list(TrivialRandom(show_progress=False).run())) == 1
     r = list(TrivialRandom(participants=1000, rounds=100, show_progress=False).run())
     assert len(r) == 1000
+    d = defaultdict(int)
     for x in r:
-        assert len(x) == 100
+        assert len(x) in {50, 90, 100}
+        d[len(x)] += 1
+    assert d[50] == 500
+    assert d[90] == 100
+    assert d[100] == 400
     for n in [0, 1, 2, 3, 4, 10, 100]:
         r = list(TrivialRandom(participants=20, rounds=10, process_count=n, show_progress=False).run())
         assert len(r) == 20
