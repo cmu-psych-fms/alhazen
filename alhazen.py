@@ -542,7 +542,7 @@ class IteratedExperiment(Experiment):
         """This method is called after all the rounds for a participant in a condition
         have been executed. The *participant* and *condition* are as for
         :meth:`run_participant`. Passed as *results* is a list of the values returned by
-        the successive invoations of the :meth:`run_participant_run` method, indexable by
+        the successive invocations of the :meth:`run_participant_run` method, indexable by
         round. This method should return a `picklable
         <https://docs.python.org/3.7/library/pickle.html#pickle-picklable>`_ value which
         will be returned to the control process for this participant and condition. This
