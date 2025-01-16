@@ -1,4 +1,4 @@
-# Copyright (c) 2020-2022 Carnegie Mellon University
+# Copyright (c) 2020-2025 Carnegie Mellon University
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of this
 # software and associated documentation files (the "Software"), to deal in the Software
@@ -65,15 +65,15 @@ def _available_processors():
 
 class Experiment:
     """An abstract base class, concrete subclasses of which define experiments that can be
-    run a collection of independent tasks, possibly distributed to multiple worker
-    processes when run on on a multi-core machine. A subclass of :class:`Experiment` must
+    run as a collection of independent tasks, possibly distributed to multiple worker
+    processes when run on a multi-core machine. A subclass of :class:`Experiment` must
     at least override the :meth:`run_participant` method; typically it will override one
     or more other methods.
 
-    The *participants*, if supplied, it should be a positive integer, the number of
+    The *participants*, if supplied, should be a positive integer, the number of
     virtual participants to run. If not supplied it defaults to 1.
 
-    The *conditions*, if supplied, it should be an iterable of values that are both
+    The *conditions*, if supplied, should be an iterable of values that are both
     hashable and `picklable
     <https://docs.python.org/3.7/library/pickle.html#pickle-picklable>`_. These denote
     different conditions in which the task of the :class:`Experiment` should be run, and
@@ -200,7 +200,7 @@ class Experiment:
        the public API. If any keyword arguments were passed to to :class:`Experiment`'s
        :meth:`run` method, they are passed to this method. It can be used to allocate data
        structures or initialize other state required by the experiment. It can count on
-       the :class:`Experiment`'s *process_count* slot have been initialized to the
+       the :class:`Experiment`'s *process_count* slot to have been initialized to the
        number of workers that will actually be used, as well as its *conditions* slot
        containing a list. This method is intended to be overridden in subclasses, and
        should not be called directly by the programmer. The default implementation of this
@@ -277,7 +277,7 @@ class Experiment:
         return result
 
     def finish_condition(self, condition, results):
-        """The control process calls this method after all the participant's performing
+        """The control process calls this method after all the participants performing
         the task in a particular condition have finished and :meth:`finish_participant`
         has been called for them. This method is called only once for each condition.
         Passed as *results* is a list of results returned by the calls of the
@@ -291,17 +291,16 @@ class Experiment:
         return results
 
     def finish_experiment(self, results):
-        """The control process calls this method, once, after all the participants have
-        been run in each of the conditions, and the corresponding calls to
-        :meth:`finish_condition` have all completed. This method is intended to be
-        overridden in subclasses, and should not be called directly by the programmer.
-        Passed as *results* is a dictionary indexed by the experiment's conditions, the
-        values being the corresponding value returned by the call to
-        :meth:`finish_condition`. The value returned by this method, or ``None`` if none
-        is returned, is returned by the :class:`Experiment`'s :meth:`run` method. The
-        :meth:`finish_exerpiment` method is intended to be overridden in subclasses, and
-        should not be called directly by the programmer. The default implementation of
-        this method returns *results* unchanged.
+        """The control process calls this method, once, after all the participants have been run
+        in each of the conditions, and the corresponding calls to :meth:`finish_condition`
+        have all completed. Passed as *results* is a dictionary indexed by the
+        experiment's conditions, the values being the corresponding values returned by the
+        calls to :meth:`finish_condition`. The value returned by this method, or ``None``
+        if none is returned, is returned by the :class:`Experiment`'s :meth:`run` method.
+        The :meth:`finish_exerpiment` method is intended to be overridden in subclasses,
+        and should not be called directly by the programmer. This method is intended to be
+        overridden in subclasses, and should not be called directly by the programmer. The
+        default implementation of this method returns *results* unchanged.
         """
         return results
 
@@ -529,7 +528,7 @@ class IteratedExperiment(Experiment):
         method, and any changes this method makes to its *context* are propogated to
         future calls of :meth:`run_participant_continue` and :meth:`run_participant_run`
         by this participant in this condition, but not to any others. The value returned
-        by this method, or ``None`` if no value is returne, is collected into a list with
+        by this method, or ``None`` if no value is returned, is collected into a list with
         other return values of this method for other rounds by this participant in this
         condition, which list is eventually passed to the :meth:`run_particiapnt_finish`
         method. This method must be overridden by subclasses, and should not be called
