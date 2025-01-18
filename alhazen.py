@@ -37,30 +37,31 @@ method.
 
 """
 
-__version__ = "1.3.4"
+__version__ = "1.4.0"
 
 import csv
-import os
 import queue
 import sys
-import traceback
 from collections import defaultdict
-from contextlib import contextmanager
-from multiprocessing import Lock, Process, Queue
+import logging
+from multiprocessing import Process, Queue, log_to_stderr, current_process
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any, List
-from warnings import warn
 
 import psutil
 from tqdm import tqdm
 
 TIMEOUT = 0.08
+DEFAULT_WORKER_COUNT = 4
 
 
 def _available_processors():
     try:
-        return psutil.cpu_count(logical=False)
+        # by default we don't believe in the HyperThreading fairy
+        return psutil.cpu_count(logical=False) or DEFAULT_WORKER_COUNT
     except Exception:
-        return 4
+        return DEFAULT_WORKER_COUNT
 
 
 class Experiment:
@@ -130,7 +131,8 @@ class Experiment:
                  csv=None,
                  fieldnames=[],
                  restval="",
-                 extrasaction="raise"):
+                 extrasaction="raise",
+                 dialect="excel"):
         self._has_been_run = False
         self._participants = participants
         # The following disjunction is in case conditions is an iterator returning no objects;
@@ -139,27 +141,20 @@ class Experiment:
         self._process_count = min((process_count or _available_processors()),
                                   (participants * len(self._conditions)))
         self._show_progress = show_progress
+        self._progress = None
         self._results = {c: [None] * participants for c in self._conditions}
         self._task_q = Queue()
         self._result_q = Queue()
-        if logfile and (sys.platform.startswith("windows") or
-                        sys.platform.startswith("cygwin")):
-            warn("Logfiles in Alhazen are not supported in Windows", RuntimeWarning)
-            logfile = None
-        self._logfile_name = logfile or os.devnull
-        self._logfile = None
-        self._logfile_opened = False
-        self._logwriter = None
-        self._loglock = Lock()
-        if isinstance(csv, str):
-            self._csv = csv
-        elif bool(csv) or fieldnames:
-            self._csv = "excel"
-        else:
-            self._csv = None
+        self._logfile = logfile
+        if csv == "dict" and not fieldnames:
+            raise RuntimeError('If csv is "dict" than fieldnames must be provided')
+        self._csv = csv
         self._fieldnames = fieldnames
         self._restval = restval
         self._extrasaction = extrasaction
+        self._dialect = dialect
+        self._logwriter = None
+        self._logerror_reported = False
 
     @property
     def participants(self):
@@ -317,137 +312,155 @@ class Experiment:
         :class:`Experiment`'s :meth:`prepare_experiment` method. Returns the value
         returned by the :meth:`finish_experiment` method, or ``None``.
         """
+        # note that Alhazen logs are unrelated to Python logging with logger
+        logger = log_to_stderr()
         if self._has_been_run:
             raise RuntimeError(f"This Experiment has already been run")
         self._has_been_run = True
         total_tasks = self._participants * len(self._conditions)
+        tempdir = None
+        logfile = None
+        logwriter = None
+        processes = []
         try:
-            with open(self._logfile_name, "w"):
-                # zaps any existing file
-                pass
-            self._open_log()
+            tempdir = TemporaryDirectory(prefix="alhazen-")
+            self._tempdir = tempdir.name
+            processes = [ Process(target=self._run_one, name=f"worker-{i:04d}")
+                          for i in range(self._process_count) ]
+            if self._logfile:
+                logfile = self._open_log(self._logfile)
+            if logfile:
+                if self._csv == "dict":
+                    self._logwriter.writeheader()
+                elif self._csv and self._fieldnames:
+                    self.log(self._fieldnames)
             self.prepare_experiment(**kwargs)
-            self._close_log()
-            processes = [ Process(target=self._run_one) for i in range(self._process_count) ]
             for p in processes:
                 p.start()
-            self._open_log()
-            try:
-                tasks = ((c, p) for c in self._conditions for p in range(self._participants))
-                tasks_completed = 0
-                condition_completions = defaultdict(int)
-                self._progress = self._show_progress and tqdm(total=total_tasks)
-                condition_context = None
-                current_condition = None
-                participant = None
-                blocking = False
-                while tasks_completed < total_tasks:
-                    did_something = False
-                    if participant is None:
-                        try:
-                            condition, participant = next(tasks)
-                        except StopIteration:
-                            participant = None
-                    if participant is not None:
-                        if not condition_context or condition != current_condition:
-                            condition_context = dict()
-                            current_condition = condition
-                            self.prepare_condition(condition, condition_context)
-                        participant_context = dict(condition_context)
-                        self.prepare_participant(participant, condition, participant_context)
-                        try:
-                            self._task_q.put((participant, condition, participant_context), blocking, TIMEOUT)
-                            participant = None
-                        except queue.Full:
-                            pass
-                        did_something = True
-                    while True:
-                        try:
-                            p, c, result = self._result_q.get(blocking, TIMEOUT)
-                            self._results[c][p] = self.finish_participant(p, c, result)
-                            tasks_completed += 1
-                            condition_completions[c] += 1
-                            assert condition_completions[c] <= self._participants
-                            if condition_completions[c] == self._participants:
-                                self._results[c] = self.finish_condition(c, self._results[c])
-                            did_something = True
-                            if self._progress:
-                                self._progress.update()
-                        except queue.Empty:
-                            break
-                    blocking = not did_something
-                for i in range(len(processes)):
-                    self._task_q.put((None, None, None))
-                self._results = self.finish_experiment(self._results)
-                for p in processes:
-                    p.join()
-            except:
-                traceback.print_exc()
-                for p in processes:
+            tasks = ((c, p) for c in self._conditions for p in range(self._participants))
+            tasks_completed = 0
+            condition_completions = defaultdict(int)
+            self._progress = self._show_progress and tqdm(total=total_tasks)
+            condition_context = None
+            current_condition = None
+            participant = None
+            blocking = False
+            self._prgrogress = None
+            while tasks_completed < total_tasks:
+                did_something = False
+                if participant is None:
                     try:
-                        p.terminate()
-                    except:
-                        traceback.print_exc()
-            finally:
+                        condition, participant = next(tasks)
+                    except StopIteration:
+                        participant = None
+                if participant is not None:
+                    if not condition_context or condition != current_condition:
+                        condition_context = dict()
+                        current_condition = condition
+                        self.prepare_condition(condition, condition_context)
+                    participant_context = dict(condition_context)
+                    self.prepare_participant(participant, condition, participant_context)
+                    try:
+                        self._task_q.put((participant, condition, participant_context), blocking, TIMEOUT)
+                        participant = None
+                    except queue.Full:
+                        pass
+                    did_something = True
+                while True:
+                    try:
+                        p, c, result, err = self._result_q.get(blocking, TIMEOUT)
+                        if err:
+                            raise RuntimeError(f"Exception in {err}")
+                        self._results[c][p] = self.finish_participant(p, c, result)
+                        tasks_completed += 1
+                        condition_completions[c] += 1
+                        assert condition_completions[c] <= self._participants
+                        if condition_completions[c] == self._participants:
+                            self._results[c] = self.finish_condition(c, self._results[c])
+                        did_something = True
+                        if self._progress:
+                            self._progress.update()
+                    except queue.Empty:
+                        break
+                blocking = not did_something
+            for i in range(len(processes)):
+                self._task_q.put((None, None, None))
+            self._results = self.finish_experiment(self._results)
+            for p in processes:
+                p.join()
+            if logfile:
+                for p in processes:
+                    for line in open(Path(self._tempdir, p.name)):
+                        logfile.write(line)
+            return self._results if self._conditions != (None,) else self._results[None]
+        except:
+            logging.exception("Exception in Alhazen control process")
+            for p in processes:
+                try:
+                    p.terminate()
+                except:
+                    logging.exception("Exception trying to kill Alhazen worker processes")
+        finally:
+            try:
                 self._result_q.close()
                 self._task_q.close()
                 if self._progress:
                     self._progress.close()
-            return self._results if self._conditions != (None,) else self._results[None]
-        finally:
-            self._close_log()
+                if logfile:
+                    logfile.close()
+                if tempdir:
+                    tempdir.cleanup()
+            except:
+                logging.exception("Exception cleaning up Alhazen control process")
 
-    def _open_log(self):
-        self._logfile = open(self._logfile_name, "a",
-                             newline=("" if self._csv or self._fieldnames else None))
-        self._logfile_opened = True
-        if self._fieldnames:
-            self._logwriter = csv.Dictwriter(self._logfile,
-                                             self._fieldnames,
+    def log(self, thing, *more, multiple=False, **kwargs):
+        """
+        """
+        if not self._logwriter:
+            return
+        try:
+            if not self._csv:
+                print(thing, *more, file=self._logwriter, **kwargs)
+            elif multiple:
+                self._logwriter.writerows(thing)
+            else:
+                self._logwriter.writerow(thing)
+        except:
+            if not self._logerror_reported:
+                self._logerror_reported = True
+                logging.exception("Exception attempting to write Alhazen log")
+
+    def _open_log(self, path):
+        file = open(path, "w", newline=("" if self._csv else None))
+        if self._csv == "dict":
+            self._logwriter = csv.DictWriter(file, self._fieldnames,
                                              restval=self._restval,
                                              extrasaction=self._extrasaction,
-                                             dialect=self._csv)
+                                             dialect=self._dialect)
         elif self._csv:
-            self._logwriter = csv.writer(self._logfile, dialect=self._csv)
-
-    def _close_log(self):
-        if self._logfile_opened:
-            self._logfile.close()
-            self._logfile_opened = False
-        self._logfile = None
+            self._logwriter = csv.writer(file, dialect=self._dialect)
+        return file
 
     def _run_one(self):
         # called in the child processes
+        logfile = None
         try:
-            self._open_log()
+            if self._logfile:
+                logfile = self._open_log(Path(self._tempdir, current_process().name))
             self.setup()
             while True:
                 participant, condition, context = self._task_q.get()
                 if participant is None:
                     break
                 result = self.run_participant(participant, condition, context)
-                self._result_q.put((participant, condition, result))
+                self._result_q.put((participant, condition, result, None))
         except:
-            traceback.print_exc()
+            logging.exception("Exception in Alhazen worker process")
+            self._result_q.put((None, None, None, current_process().name))
             sys.exit(1)
         finally:
-            self._close_log()
-
-    @property
-    @contextmanager
-    def log(self):
-        """A context manager holding a lock to synchronize writing to this
-        :class:`Experiment`'s log file. When this context manager is used in a
-        ``with...as`` statement it in turn returns either the log file, or, if a CSV
-        writer is being used, that writer. For example,
-
-        with self.log as writer:
-            writer.writerow([field, another_field])
-
-        """
-        with self._loglock:
-            yield self._logwriter or self._logfile
-            self._logfile.flush()
+            if logfile:
+                logfile.close()
 
 
 class IteratedExperiment(Experiment):
@@ -558,5 +571,4 @@ class IteratedExperiment(Experiment):
             if not self.run_participant_continue(round, participant, condition, context):
                 break
             results.append(self.run_participant_run(round, participant, condition, context))
-        self.run_participant_finish(participant, condition, context)
         return self.run_participant_finish(participant, condition, results)

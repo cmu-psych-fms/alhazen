@@ -37,23 +37,6 @@ you may have to modify the above in various ways
 
 * you may need to use some combination of the above
 
-If you are unable to install Alhazen as above, you can instead
-`download a tarball <https://bitbucket.org/dfmorrison/alhazen/downloads/?tab=tags>`_.
-The tarball will have a filename something like alhazen-1.3.4.tar.gz.
-Assuming this file is at ``/some/directory/alhazen-1.3.4.tar.gz`` install it by typing at the command line
-
-    pip install /some/directory/alhazen-1.3.4.tar.gz
-
-Alternatively you can untar the tarball with
-
-    tar -xf /some/directory/alhazen-1.3.4.tar.gz
-
-and then change to the resulting directory and type
-
-    python setup.py install
-
-
-
 Alhazen is released under the following MIT style license:
 
 Copyright (c) 2020-2025 Carnegie Mellon University
