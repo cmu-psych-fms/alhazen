@@ -9,7 +9,7 @@ activities. This is a common pattern, each such run usually
 corresponding to a distinct virtual participant, or possibly a
 collection of interacting participants.
 
-There is [online documentation of Alhazen](https://halle.psy.cmu.edu/alhazen/),
+There is [online documentation of Alhazen](https://cmu-psych-fms.github.io/fms/alhazen/index.html),
 and the [sources](https://github.com/cmu-psych-fms/alhazen) are on GitHub.
 
 

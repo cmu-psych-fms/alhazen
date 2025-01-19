@@ -62,7 +62,7 @@ we’ll graph the average number of times a participant made the risky
 choice as a function of the round. In our implementation the simulated
 participants’ actions will be decided by an
 `Instance Based Learning <https://www.sciencedirect.com/science/article/abs/pii/S0364021303000314>`_
-model, written using `PyACTUp <https://halle.psy.cmu.edu/pyactup/>`_.
+model, written using `PyACTUp <https://cmu-psych-fms.github.io/fms/pyactup/index.html>`_.
 
 First we start by making a subclass of the Alhazen
 :class:`IteratedExperiment` class, and override its
