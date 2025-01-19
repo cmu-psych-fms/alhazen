@@ -1,0 +1,6 @@
+packaging
+pytest
+Sphinx
+tqdm
+twine
+wheel

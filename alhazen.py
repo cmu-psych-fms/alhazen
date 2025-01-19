@@ -19,8 +19,8 @@
 
 """Alhazen is a small, simple framework to facilitate running experiments, written in
 Python, using cognitive models, or similar applications, in multiple, parallel processes.
-It is only useful on multi-core machines, though most modern machines are such; the more
-cores, the more performance benefit you are likely to get by using it. It also depends
+It is primarily useful on multi-core machines, though most modern machines are such; the
+more cores, the more performance benefit you are likely to get by using it. It also depends
 upon the experiment being structured as a large number of identical, independent runs of
 the same activity, or of similar activities. This is a common pattern, each such run
 usually corresponding to a distinct virtual participant, or possibly a collection of
@@ -34,7 +34,6 @@ you make a subclass of its :class:`Experiment` or :class:`IteratedExperiment` cl
 override some of its methods to describe what the workers should do and what results to
 return and aggregate, declare how many workers to use, and then call its :meth:`run`
 method.
-
 """
 
 __version__ = "1.4.0"

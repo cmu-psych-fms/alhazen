@@ -1,6 +1,7 @@
 *.pyc
 _*
 *.egg-info
+.venv-activation-script
 MANIFEST
 dist
 build
