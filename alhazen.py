@@ -44,24 +44,15 @@ import queue
 import sys
 from collections import defaultdict
 import logging
-from multiprocessing import Process, Queue, log_to_stderr, current_process
+from math import ceil
+from multiprocessing import Process, Queue, log_to_stderr, current_process, cpu_count
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from tqdm import tqdm
 from typing import Any, List
 
-import psutil
-from tqdm import tqdm
-
 TIMEOUT = 0.08
-DEFAULT_WORKER_COUNT = 4
-
-
-def _available_processors():
-    try:
-        # by default we don't believe in the HyperThreading fairy
-        return psutil.cpu_count(logical=False) or DEFAULT_WORKER_COUNT
-    except Exception:
-        return DEFAULT_WORKER_COUNT
+DEFAULT_PROCESSOR_COUNT = 4
 
 
 class Experiment:
@@ -82,43 +73,44 @@ class Experiment:
     conditions are often most easily represented as tuples of elements of the underlying
     individual sets of conditions.
 
-    The *process_count*, if supplied, should be a non-negative integer. If non-zero it is
-    the number of worker processes to use. Note that the overall program will actually
-    contain one more process than this, the control process, which is also the main
-    process in which the :class:`Experiment`'s :meth:`run` method is called. If
+    The *process_count*, if supplied, should be a non-negative number. If a positive
+    integer it is the number of worker processes to use. Note that the overall program
+    will actually contain one more process than this, the control process, which is also
+    the main process in which the :class:`Experiment`'s :meth:`run` method is called. If
     *process_count* is zero (the default if not supplied) it indicates that Alhazen should
     attempt to determine the number of cores available and use this number of worker
-    processes. For various reasons this determination may be inaccurate, so if you know
-    by other means what will work best for your experiment it may be better to supply it
-    explicitly. Note also that this determination is of physical cores, ignoring any
-    virtual ones supplied by `simultaneous mutlithreading
-    <https://en.wikipedia.org/wiki/Simultaneous_multithreading>`_. If such a determination
-    cannot be made a default of 4 is used.
+    processes. The normal Python function that provides this information includes
+    "virtual" cores in its count on machines using simultaneous multithreading
+    <https://en.wikipedia.org/wiki/Simultaneous_multithreading>`_ (Hyper-Threading). If
+    *process_count* is a positive floating point number less than one, it is multiplies by
+    the number of available cores, as above, and rounded up to an integer number of worker
+    processes to use. For example, if your machine does support Hyper-Threading but you
+    don't believe in the Hyper-Threading Fairy, you might supply a *process_count* value
+    of `0.5`. If the number of cores present in the machine is needed but cannot be
+    determined a default of four is used instead.
 
     By default when an :class:`Experiment` is running a
     `tqdm <https://tqdm.github.io/>`_ progress indicator is shown, advanced as each task
     is completed. This may be suppressed by setting *show_progress* to ``False``.
 
-    Because participants are typically run in multiple processes, if they all want to
-    write to a single log file access to that file must be synchronized. Alhazen supplies
-    a mechanism to more easily facilitate this in easy cases. A file name can be supplied
-    as a value of the *logfile* parameter, in which case it names a file that will be
-    opened for writing when the experiment is run, and closed when it finishes. Within the
-    various methods the programmer overrides that file can be accessed using the
-    :attr:`log` context manager, which ensures synchronization and makes available the
-    file. If no *logfile* is supplied or it is None, the context manager returns a file
-    that is a sink; that is, in this case writing to this file simply discards the output.
-
-    However, this ability to synchronize log files is not supported on Windows. Supplying
-    value for *logfile* on Windows will result in a warning being displayed, and the value
-    will bit ignored.
+    Because participants are typically run in multiple processes, they cannot reliably
+    write to a single log file without synchronization, which is both cumberson and can
+    significantly degrade performance. Alhazen supplies a mechanism to more easily
+    facilitate logging of results. A file name can be supplied as a value of the *logfile*
+    parameter, in which case it names a file that will be opened for writing when the
+    experiment is run, and closed when it finishes. Each worker process also maintains a
+    similar temporary file which it can write to independently, and Alhazon than
+    concatenates all these files into the main log file when the experiment concludes.
+    Within the various methods the programmer overrides the log can be written to suing
+    the :meth:`log` method.
 
     It is frequently useful to write log files as Comma Separated Values (CSV) files. The
-    *logfile* will be wrapped with a Python :class:`csv.writer` if *csv* is not false.
-    If *csv* is a string it should be a CSV dialect. If it is ``True`` the `excel` dialect
-    will be used. To use a :class:`csv.DictWriter` supply the *fieldnames*. In this case
-    the *restval* and *extrasaction* parameters can be used to pass these extra parameters
-    to the :class:`csv.DictWriter`.
+    *logfile* will effectively be wrapped with a Python :class:`csv.writer` if *csv* is
+    not false. If the value of *csv* is `"dict"` that CSV writer will be a `DictWriter
+    <https://docs.python.org/3/library/csv.html#csv.DictWriter/>_` When that CSV writer is
+    configured the values of *fieldnames*, *restval*, *extrasaction* and *dialect* are
+    passed to it. If *csv* is false most of those parameters are ignored; the exception is
+    *fieldnames* which, if provided, is written as a header in the resulting log file.
 
     """
 
@@ -138,8 +130,21 @@ class Experiment:
         # The following disjunction is in case conditions is an iterator returning no objects;
         # such an iterator is truthy, but results in an empty tuple.
         self._conditions = (tuple(conditions) or (None,)) if conditions else (None,)
-        self._process_count = min((process_count or _available_processors()),
-                                  (participants * len(self._conditions)))
+        try:
+            avail = cpu_count() or DEFAULT_PROCESSOR_COUNT
+        except:
+            avail = DEFAULT_PROCESSOR_COUNT
+        try:
+            if process_count >= 1:
+                self._process_count = process_count
+            elif process_count > 0:
+                self._process_count = ceil(process_count * avail)
+            else:
+                self._process_count = avail
+        except RuntimeError:
+                self._process_count = avail
+        if (n := participants * len(self._conditions)) < self._process_count:
+            self._process_count = n
         self._show_progress = show_progress
         self._progress = None
         self._results = {c: [None] * participants for c in self._conditions}
@@ -330,10 +335,13 @@ class Experiment:
             if self._logfile:
                 logfile = self._open_log(self._logfile)
             if logfile:
-                if self._csv == "dict":
-                    self._logwriter.writeheader()
-                elif self._csv and self._fieldnames:
-                    self.log(self._fieldnames)
+                if self._fieldnames:
+                    if self._csv == "dict":
+                        self._logwriter.writeheader()
+                    elif self._csv:
+                        self.log(self._fieldnames)
+                    else:
+                        self.log(",".join(self._fieldnames))
             self.prepare_experiment(**kwargs)
             for p in processes:
                 p.start()
@@ -395,11 +403,6 @@ class Experiment:
             return self._results if self._conditions != (None,) else self._results[None]
         except:
             logging.exception("Exception in Alhazen control process")
-            for p in processes:
-                try:
-                    p.terminate()
-                except:
-                    logging.exception("Exception trying to kill Alhazen worker processes")
         finally:
             try:
                 self._result_q.close()
@@ -414,8 +417,16 @@ class Experiment:
                 logging.exception("Exception cleaning up Alhazen control process")
 
     def log(self, thing, *more, multiple=False, **kwargs):
+        """Writes information to the Alhazen log file.
+        If there is no log file this method does nothing. If the log file is not a CSV log
+        file it effectively passes all its arguments to the normal Python `print`
+        function, albeit with the output directed to the log file. Otherwise it
+        effectively calls `writerow
+        <https://docs.python.org/3/library/csv.html#csv.csvwriter.writerow>`_ on *thing*;
+        if *multiple* is true, it instead calls `writerows
+        <https://docs.python.org/3/library/csv.html#csv.csvwriter.writerows>`_.
         """
-        """
+        print("log", thing, more, multiple, kwargs)
         if not self._logwriter:
             return
         try:
@@ -439,6 +450,8 @@ class Experiment:
                                              dialect=self._dialect)
         elif self._csv:
             self._logwriter = csv.writer(file, dialect=self._dialect)
+        else:
+            self._logwriter = file
         return file
 
     def _run_one(self):

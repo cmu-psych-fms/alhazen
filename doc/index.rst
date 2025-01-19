@@ -39,21 +39,6 @@ you may have to modify the above in various ways
 
 * you may need to use some combination of the above
 
-If you are unable to install Alhazen as above, you can instead
-`download a tarball <https://bitbucket.org/dfmorrison/alhazen/downloads/?tab=tags>`_.
-The tarball will have a filename something like alhazen-1.3.4.tar.gz.
-Assuming this file is at ``/some/directory/alhazen-1.3.4.tar.gz`` install it by typing at the command line
-
-  .. parsed-literal:: pip install /some/directory/alhazen-1.3.4.tar.gz
-
-Alternatively you can untar the tarball with
-
-  .. parsed-literal:: tar -xf /some/directory/alhazen-1.3.4.tar.gz
-
-and then change to the resulting directory and type
-
-  .. parsed-literal:: python setup.py install
-
 
 Mailing List
 ============
@@ -103,6 +88,8 @@ and returns whether or not it made the risky choice, for subsequent
 reporting by the parent, control process. This return value must be
 `picklable
 <https://docs.python.org/3.7/library/pickle.html#pickle-picklable>`_.
+We learn instances for each of the two possible choices with a prepopulated
+instance value of twelve to ensure exploration of both choices.
 Again this method is called in a worker process, and we are ignoring
 the values of the *round*, *participant*, *condition* and *context*
 parameters.
@@ -147,7 +134,7 @@ command line arguments to specify the number of participants, number
 of rounds and number of worker processes. If these arguments are not
 provided explicitly they default to 10,000 participants, 200 rounds,
 and as many worker processes as the machine it is running in has
-cores.
+(possibly virtual) cores.
 
 .. code-block:: python
 
@@ -242,11 +229,6 @@ is synchronized across the worker processes using the :attr:`log` property.
 
     class SafeRisky(IteratedExperiment):
 
-        def prepare_experiment(self, **kwargs):
-            with self.log as w:
-                if w:
-                    w.writerow("expected value,participant,round,choice,payoff".split(","))
-
         def run_participant_prepare(self, participant, condition, context):
             self.memory = pyactup.Memory()
             self.memory.learn(choice="safe", payoff=12, advance=0)
@@ -261,8 +243,7 @@ is synchronized across the worker processes using the :attr:`log` property.
             else:
                 payoff = 0
             self.memory.learn(choice=choice, payoff=payoff)
-            with self.log as w:
-                w.writerow([condition, participant, round, choice, payoff])
+            self.log([condition, participant, round, choice, payoff])
             return choice == "risky"
 
 
@@ -281,7 +262,8 @@ is synchronized across the worker processes using the :attr:`log` property.
                         participants=participants,
                         process_count=workers,
                         logfile=log,
-                        csv=True)
+                        csv=True,
+                        fieldnames="expected value,participant,round,choice,payoff".split(","))
         results = exp.run()
         for c in exp.conditions:
             plt.plot(range(1, rounds + 1),
@@ -368,7 +350,7 @@ Experiments
 
    .. automethod:: finish_experiment
 
-   .. autoattribute:: log
+   .. automethod:: log
 
 Iterated Experiments
 --------------------

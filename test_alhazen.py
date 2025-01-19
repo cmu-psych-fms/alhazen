@@ -48,11 +48,7 @@ class Trivial(Experiment):
         context["p"] = participant * 7
 
     def run_participant(self, participant, condition, context):
-        fuck = False
-        with self.log as logwriter:
-            fuck = True
-            logwriter.write(f"{participant}{condition}{context['c']}{context['p']}")
-        assert fuck
+        self.log(participant, condition, context["c"], context["p"])
         return ((participant, condition, context["c"], context["p"], self.setup_called),
                 current_process().name)
 
@@ -110,15 +106,15 @@ def test_trivial():
                           (2, 2, 6, 14, "setup called")}
     assert len(process_set) == 2
 
-def test_log(tmp_path):
+def test_trivial_log(tmp_path):
     p = tmp_path / "log.txt"
     tr = Trivial(show_progress=False,
                  conditions="abc",
                  participants=3,
-                 logfile=p).run()
+                 logfile=p,
+                 fieldnames=('participant,condition,context["c"],context["p"],setup_called]'.split(","))).run()
     with open(p) as f:
-        assert len(f.readline()) == 57
-
+        assert len(f.readlines()) == 10
 
 class TrivialRandom(IteratedExperiment):
 
@@ -196,3 +192,66 @@ def test_logistic_sampler():
     execute_once(process_count=2, conditions=[1000])
     execute_once(process_count=300, conditions=[0.0001])
     execute_once(conditions=[0.01, 1.1, 100.0])
+
+
+class LogTest(IteratedExperiment):
+
+    def fmt(self, *args, **kwargs):
+        print("fmt", self._csv, self._logwriter, args)
+        if self._csv == "dict":
+            self.log({"stuff": args[0]}, **kwargs)
+        elif self._csv:
+            self.log(args, **kwargs)
+        else:
+            self.log(*args)
+
+    def prepare_experiment(self, **kwargs):
+        self.fmt("pe");
+
+    def setup(self):
+        self.fmt("setup");
+
+    def prepare_condition(self, condition, context):
+        self.fmt("pc");
+
+    def prepare_participant(self, participant, condition, context):
+        self.fmt("pp");
+
+    def run_participant_prepare(self, participant, condition, context):
+        self.fmt("rpp")
+
+    def run_participant_continue(self, round, participant, condition, context):
+        self.fmt("rpc")
+        return True
+
+    def run_participant_run(self, round, participant, condition, context):
+        self.fmt("rpr", round, participant, condition, context);
+
+    def run_participant_finish(self, participant, condition, results):
+        self.fmt("rpf")
+        return results
+
+    def finish_participant(self, participant, condition, result):
+        self.fmt("fp");
+        return result
+
+    def finish_condition(self, condition, result):
+        self.fmt("fc");
+        return result
+
+    def finish_experiment(self, result):
+        self.fmt("fe");
+        return result
+
+
+def test__log(tmp_path):
+    p = tmp_path / "log.txt"
+    LogTest(show_progress=False, logfile=p, fieldnames=("stuff",)).run()
+    with open(p) as f:
+        assert f.read() == "stuff\npe\npc\npp\nfp\nfc\nfe\nsetup\nrpp\nrpc\nrpr 0 0 None {}\nrpf\n"
+    LogTest(show_progress=False, logfile=p, csv=True, fieldnames=("stuff",)).run()
+    with open(p) as f:
+        assert f.read() == "stuff\npe\npc\npp\nfp\nfc\nfe\nsetup\nrpp\nrpc\nrpr,0,0,,{}\nrpf\n"
+    LogTest(show_progress=False, logfile=p, csv="dict", fieldnames=("stuff",)).run()
+    with open(p) as f:
+        assert f.read() == "stuff\npe\npc\npp\nfp\nfc\nfe\nsetup\nrpp\nrpc\nrpr\nrpf\n"
