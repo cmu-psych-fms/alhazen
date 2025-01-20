@@ -144,12 +144,13 @@ and as many worker processes as the machine it is running in has
     import pyactup
     import random
 
+
     class SafeRisky(IteratedExperiment):
 
         def run_participant_prepare(self, participant, condition, context):
             self.memory = pyactup.Memory()
-            self.memory.learn(choice="safe", payoff=12, advance=0)
-            self.memory.learn(choice="risky", payoff=12)
+            self.memory.learn({"choice": "safe", "payoff": 12})
+            self.memory.learn({"choice": "risky", "payoff": 12}, advance=True)
 
         def run_participant_run(self, round, participant, condition, context):
             choice, bv = self.memory.best_blend("payoff", ("safe", "risky"), "choice")
@@ -159,8 +160,9 @@ and as many worker processes as the machine it is running in has
                 payoff = 10
             else:
                 payoff = 0
-            self.memory.learn(choice=choice, payoff=payoff)
+            self.memory.learn({"choice": choice, "payoff": payoff}, advance=True)
             return choice == "risky"
+
 
     @click.command()
     @click.option("--rounds", default=200, help="the number of rounds each participant plays")
@@ -180,6 +182,7 @@ and as many worker processes as the machine it is running in has
         plt.ylabel("fraction choosing risky")
         plt.title(f"Safe versus Risky, {participants:,d} participants")
         plt.show()
+
 
     if __name__== "__main__":
         main()
@@ -231,8 +234,8 @@ is synchronized across the worker processes using the :attr:`log` property.
 
         def run_participant_prepare(self, participant, condition, context):
             self.memory = pyactup.Memory()
-            self.memory.learn(choice="safe", payoff=12, advance=0)
-            self.memory.learn(choice="risky", payoff=12)
+            self.memory.learn({"choice": "safe", "payoff": 12})
+            self.memory.learn({"choice": "risky", "payoff": 12}, advance=True)
 
         def run_participant_run(self, round, participant, condition, context):
             choice, bv = self.memory.best_blend("payoff", ("safe", "risky"), "choice")
@@ -242,7 +245,7 @@ is synchronized across the worker processes using the :attr:`log` property.
                 payoff = 10
             else:
                 payoff = 0
-            self.memory.learn(choice=choice, payoff=payoff)
+            self.memory.learn({"choice": choice, "payoff": payoff}, advance=True)
             self.log([condition, participant, round, choice, payoff])
             return choice == "risky"
 
@@ -263,7 +266,7 @@ is synchronized across the worker processes using the :attr:`log` property.
                         process_count=workers,
                         logfile=log,
                         csv=True,
-                        fieldnames="expected value,participant,round,choice,payoff".split(","))
+                        fieldnames=("expected value,participant,round,choice,payoff".split(",")))
         results = exp.run()
         for c in exp.conditions:
             plt.plot(range(1, rounds + 1),
@@ -280,7 +283,6 @@ is synchronized across the worker processes using the :attr:`log` property.
 
     if __name__== "__main__":
         main()
-
 
 When run with the default command line arguments, a graph like the
 following is displayed. We see that the probability of getting the

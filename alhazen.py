@@ -88,6 +88,12 @@ class Experiment:
     of `0.5`. If the number of cores present in the machine is needed but cannot be
     determined a default of four is used instead.
 
+    .. note::
+        When debugging code you have written in methods of a subclass of
+        :class:`Experiment` (or :class:`IteratedExperiment`) it is often useful to
+        temporarily set *process_count* to one to simplify understanding diagnostic
+        or debugging output from the worker process(es).
+
     By default when an :class:`Experiment` is running a
     `tqdm <https://tqdm.github.io/>`_ progress indicator is shown, advanced as each task
     is completed. This may be suppressed by setting *show_progress* to ``False``.
@@ -400,8 +406,20 @@ class Experiment:
                     for line in open(Path(self._tempdir, p.name)):
                         logfile.write(line)
             return self._results if self._conditions != (None,) else self._results[None]
+        except KeyboardInterrupt:
+            for p in processes:
+                try:
+                    p.terminate()
+                except:
+                    pass
+            sys.exit(2)
         except:
             logging.exception("Exception in Alhazen control process")
+            for p in processes:
+                try:
+                    p.terminate()
+                except:
+                    pass
         finally:
             try:
                 self._result_q.close()
@@ -425,7 +443,6 @@ class Experiment:
         if *multiple* is true, it instead calls `writerows
         <https://docs.python.org/3/library/csv.html#csv.csvwriter.writerows>`_.
         """
-        print("log", thing, more, multiple, kwargs)
         if not self._logwriter:
             return
         try:

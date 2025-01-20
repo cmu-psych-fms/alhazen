@@ -9,15 +9,10 @@ EXPECTED_VALUES = [5, 4, 3, 2, 1]
 
 class SafeRisky(IteratedExperiment):
 
-    def prepare_experiment(self, **kwargs):
-        with self.log as w:
-            if w:
-                w.writerow("expected value,participant,round,choice,payoff".split(","))
-
     def run_participant_prepare(self, participant, condition, context):
         self.memory = pyactup.Memory()
-        self.memory.learn(choice="safe", payoff=12, advance=0)
-        self.memory.learn(choice="risky", payoff=12)
+        self.memory.learn({"choice": "safe", "payoff": 12})
+        self.memory.learn({"choice": "risky", "payoff": 12}, advance=True)
 
     def run_participant_run(self, round, participant, condition, context):
         choice, bv = self.memory.best_blend("payoff", ("safe", "risky"), "choice")
@@ -27,9 +22,8 @@ class SafeRisky(IteratedExperiment):
             payoff = 10
         else:
             payoff = 0
-        self.memory.learn(choice=choice, payoff=payoff)
-        with self.log as w:
-            w.writerow([condition, participant, round, choice, payoff])
+        self.memory.learn({"choice": choice, "payoff": payoff}, advance=True)
+        self.log([condition, participant, round, choice, payoff])
         return choice == "risky"
 
 
@@ -48,7 +42,8 @@ def main(rounds=200, participants=10_000, workers=0, log=None):
                     participants=participants,
                     process_count=workers,
                     logfile=log,
-                    csv=True)
+                    csv=True,
+                    fieldnames=("expected value,participant,round,choice,payoff".split(",")))
     results = exp.run()
     for c in exp.conditions:
         plt.plot(range(1, rounds + 1),
